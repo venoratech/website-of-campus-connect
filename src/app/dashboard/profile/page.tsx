@@ -10,6 +10,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { User, Mail, Phone, Camera } from 'lucide-react';
 
+// Define the profile update data interface
+interface ProfileUpdateData {
+  first_name: string;
+  last_name: string;
+  phone_number: string;
+  profile_image_url: string;
+  student_id?: string;
+  graduation_year?: number | null;
+}
+
 export default function ProfilePage() {
   const { profile, user, isLoading } = useAuth();
   const [firstName, setFirstName] = useState('');
@@ -44,7 +54,7 @@ export default function ProfilePage() {
     setSuccess(null);
 
     try {
-      const updateData: any = {
+      const updateData: ProfileUpdateData = {
         first_name: firstName,
         last_name: lastName,
         phone_number: phoneNumber,
@@ -65,8 +75,8 @@ export default function ProfilePage() {
       if (updateError) throw updateError;
 
       setSuccess('Profile updated successfully!');
-    } catch (err: any) {
-      setError(err.message || 'Error updating profile');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error updating profile');
       console.error(err);
     } finally {
       setIsSubmitting(false);

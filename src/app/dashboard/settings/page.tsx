@@ -3,7 +3,6 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +11,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { formatDate } from '@/lib/utils';
 import { ShieldCheck, Lock, Bell, User, Mail } from 'lucide-react';
+
+interface ErrorWithMessage {
+  message: string;
+}
+
+function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as Record<string, unknown>).message === 'string'
+  );
+}
 
 export default function SettingsPage() {
   const { profile, user, isLoading } = useAuth();
@@ -99,8 +111,9 @@ export default function SettingsPage() {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (err: any) {
-      setError(err.message || 'Error updating password');
+    } catch (err: unknown) {
+      const errorMessage = isErrorWithMessage(err) ? err.message : 'Error updating password';
+      setError(errorMessage);
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -131,8 +144,9 @@ export default function SettingsPage() {
       
       // Since we're not actually saving in this demo, show success
       setSuccess('Notification settings updated');
-    } catch (err: any) {
-      setError(err.message || 'Error saving settings');
+    } catch (err: unknown) {
+      const errorMessage = isErrorWithMessage(err) ? err.message : 'Error saving settings';
+      setError(errorMessage);
       console.error(err);
     } finally {
       setIsSubmitting(false);

@@ -10,14 +10,26 @@ import { Label } from '@/components/ui/label';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+interface ErrorWithMessage {
+  message: string;
+}
+
+function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as Record<string, unknown>).message === 'string'
+  );
+}
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  // Explicitly define role as 'vendor' - do not change this value
-  const [role] = useState('vendor');
+  // The role is hardcoded to 'vendor' and never changes
+  const VENDOR_ROLE = 'vendor' as const;
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -48,8 +60,14 @@ export default function SignupPage() {
     }
 
     try {
-      // Force the role to be 'vendor' regardless of state
+      console.log('Signing up with role:', VENDOR_ROLE);
+      
+      // Store the role in localStorage as a backup
+      localStorage.setItem('intended_role', VENDOR_ROLE);
+      
+      // Always pass 'vendor' as the role, never use a variable
       const { error: signUpError } = await signUp(email, password, 'vendor');
+      
       if (signUpError) {
         setError(signUpError.message);
       } else {
@@ -57,8 +75,9 @@ export default function SignupPage() {
         alert('Registration successful! Please check your email to confirm your account.');
         router.push('/login');
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during signup');
+    } catch (err: unknown) {
+      const errorMessage = isErrorWithMessage(err) ? err.message : 'An error occurred during signup';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -68,9 +87,9 @@ export default function SignupPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 p-4">
       <Card className="w-full max-w-md shadow-lg border-gray-200">
         <CardHeader className="space-y-1 bg-white">
-          <CardTitle className="text-2xl font-bold text-center text-gray-900">Create an account</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center text-gray-900">Create a Vendor Account</CardTitle>
           <CardDescription className="text-center text-gray-600">
-            Enter your details to create your account
+            Enter your details to create your vendor account
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -126,11 +145,11 @@ export default function SignupPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="role" className="text-gray-800 font-medium">Role</Label>
-              <div className="p-2 border border-gray-300 rounded-md bg-white text-gray-900">
+              <Label htmlFor="role" className="text-gray-800 font-medium">Account Type</Label>
+              <div className="p-2 border border-gray-300 rounded-md bg-white text-gray-900 font-medium">
                 Vendor
               </div>
-              {/* Ensure role is explicitly passed as 'vendor' */}
+              {/* Triple-ensure that role is vendor */}
               <input type="hidden" name="role" value="vendor" id="role" />
             </div>
           </CardContent>
@@ -140,7 +159,7 @@ export default function SignupPage() {
               className="w-full bg-gray-800 hover:bg-black text-white" 
               disabled={isLoading}
             >
-              {isLoading ? "Creating account..." : "Create account"}
+              {isLoading ? "Creating vendor account..." : "Create vendor account"}
             </Button>
             <div className="text-sm text-center text-gray-600">
               Already have an account?{' '}

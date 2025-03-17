@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, FoodVendor, MenuItem } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -200,7 +200,7 @@ export default function MenuManagementPage() {
 
   const uploadImage = async (file: File): Promise<string> => {
     const fileName = `${Date.now()}-${file.name}`;
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from('menu-images') // Create a bucket named 'menu-images' in Supabase Storage
       .upload(`public/${fileName}`, file, {
         cacheControl: '3600',
@@ -265,8 +265,8 @@ export default function MenuManagementPage() {
 
       resetCategoryForm();
       setIsAddingCategory(false);
-    } catch (err: any) {
-      setError(err.message || 'Error saving category');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error saving category');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -291,8 +291,8 @@ export default function MenuManagementPage() {
       
       setSuccess('Category deleted successfully');
       setCategories(categories.filter(cat => cat.id !== id));
-    } catch (err: any) {
-      setError(err.message || 'Error deleting category');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error deleting category');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -360,8 +360,8 @@ export default function MenuManagementPage() {
 
       resetMenuItemForm();
       setIsAddingMenuItem(false);
-    } catch (err: any) {
-      setError(err.message || 'Error saving menu item');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error saving menu item');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -372,22 +372,51 @@ export default function MenuManagementPage() {
     if (!confirm('Are you sure you want to delete this menu item?')) {
       return;
     }
-
+  
     setIsSubmitting(true);
     setError(null);
     
     try {
-      const { error: deleteError } = await supabase
-        .from('menu_items')
-        .delete()
-        .eq('id', id);
+      // First, check if this menu item is referenced in any orders
+      const { data: orderItems, error: checkError } = await supabase
+        .from('order_items')
+        .select('id')
+        .eq('menu_item_id', id)
+        .limit(1);
       
-      if (deleteError) throw deleteError;
+      if (checkError) throw checkError;
       
-      setSuccess('Menu item deleted successfully');
-      setMenuItems(menuItems.filter(item => item.id !== id));
-    } catch (err: any) {
-      setError(err.message || 'Error deleting menu item');
+      if (orderItems && orderItems.length > 0) {
+        // This item is used in orders, so we'll mark it as unavailable instead of deleting it
+        const { error: updateError } = await supabase
+          .from('menu_items')
+          .update({ 
+            is_available: false,
+            // You might want to add a note to the description indicating it was removed
+            description: `[REMOVED] ${menuItems.find(item => item.id === id)?.description || ''}`
+          })
+          .eq('id', id);
+        
+        if (updateError) throw updateError;
+        
+        setSuccess('Menu item has been marked as unavailable because it exists in customer orders');
+        setMenuItems(menuItems.map(item => 
+          item.id === id ? { ...item, is_available: false } : item
+        ));
+      } else {
+        // If no orders reference this item, we can safely delete it
+        const { error: deleteError } = await supabase
+          .from('menu_items')
+          .delete()
+          .eq('id', id);
+        
+        if (deleteError) throw deleteError;
+        
+        setSuccess('Menu item deleted successfully');
+        setMenuItems(menuItems.filter(item => item.id !== id));
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error handling menu item deletion');
       console.error(err);
     } finally {
       setIsSubmitting(false);

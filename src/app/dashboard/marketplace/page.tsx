@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase, MarketplaceItem, MarketplaceTransaction } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import Image from 'next/image';
 import {
   Table,
   TableBody,
@@ -17,7 +18,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -27,7 +27,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatDate, formatPrice } from '@/lib/utils';
-import { Eye, CheckCircle, XCircle, ShoppingBag, DollarSign, BarChart4 } from 'lucide-react';
+import { Eye, XCircle, ShoppingBag, DollarSign, BarChart4 } from 'lucide-react';
 
 interface ItemWithDetails extends MarketplaceItem {
   seller?: {
@@ -141,8 +141,8 @@ export default function MarketplacePage() {
         if (categoriesError) throw categoriesError;
         
         setCategories(categoriesData);
-      } catch (err: any) {
-        setError(err.message || 'Error fetching marketplace data');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Error fetching marketplace data');
         console.error(err);
       }
     };
@@ -174,8 +174,8 @@ export default function MarketplacePage() {
       setItems(items.map(item => 
         item.id === itemId ? { ...item, status: 'deleted' } : item
       ));
-    } catch (err: any) {
-      setError(err.message || 'Error removing item');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error removing item');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -409,9 +409,9 @@ export default function MarketplacePage() {
                 <TableHeader>
                   <TableRow className="border-0">
                     <TableHead className="border-b">Item</TableHead>
-                    <TableHead className="border-b">Buyer</TableHead>
                     <TableHead className="border-b">Seller</TableHead>
-                    <TableHead className="border-b">Amount</TableHead>
+                    <TableHead className="border-b">Price</TableHead>
+                    <TableHead className="border-b">Category</TableHead>
                     <TableHead className="border-b">Date</TableHead>
                     <TableHead className="border-b">Status</TableHead>
                     <TableHead className="border-b text-right">Actions</TableHead>
@@ -430,11 +430,15 @@ export default function MarketplacePage() {
                         <TableCell>
                           <div className="flex items-center space-x-2">
                             {getPrimaryImage(item) && (
-                              <img 
-                                src={getPrimaryImage(item)!} 
-                                alt={item.title} 
-                                className="h-10 w-10 rounded object-cover"
-                              />
+                              <div className="relative h-10 w-10">
+                                <Image 
+                                  src={getPrimaryImage(item)!} 
+                                  alt={item.title} 
+                                  width={40}
+                                  height={40}
+                                  className="rounded object-cover"
+                                />
+                              </div>
                             )}
                             <span className="font-medium">{item.title}</span>
                           </div>
@@ -590,11 +594,15 @@ export default function MarketplacePage() {
             <div className="space-y-4">
               <div className="flex space-x-4">
                 {getPrimaryImage(selectedItem) && (
-                  <img 
-                    src={getPrimaryImage(selectedItem)!} 
-                    alt={selectedItem.title} 
-                    className="h-32 w-32 rounded-md object-cover"
-                  />
+                  <div className="relative h-32 w-32">
+                    <Image 
+                      src={getPrimaryImage(selectedItem)!} 
+                      alt={selectedItem.title} 
+                      width={128}
+                      height={128}
+                      className="rounded-md object-cover"
+                    />
+                  </div>
                 )}
                 <div className="flex-1">
                   <h3 className="text-lg font-semibold">{selectedItem.title}</h3>

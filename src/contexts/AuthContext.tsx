@@ -1,6 +1,7 @@
+// contexts/AuthContext.tsx
 'use client';
 import { createContext, useContext, useEffect, useState } from 'react';
-import { Session, User } from '@supabase/supabase-js';
+import { Session, User, AuthError } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { supabase, Profile } from '@/lib/supabase';
 
@@ -9,8 +10,8 @@ type AuthContextType = {
   profile: Profile | null;
   session: Session | null;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
-  signUp: (email: string, password: string, role: 'student' | 'vendor' | 'admin') => Promise<{ error: any }>;
+  signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
+  signUp: (email: string, password: string, role: 'student' | 'vendor' | 'admin') => Promise<{ error: AuthError | Error | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -32,24 +33,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         // If there's a pending role and it doesn't match current role
         if (pendingRole && profile.role !== pendingRole) {
+          console.log('Found pending role update:', pendingRole, 'current role:', profile.role);
           try {
             // Try to update the profile with the intended role
-            await supabase
+            const { error: updateError } = await supabase
               .from('profiles')
               .update({ role: pendingRole })
               .eq('id', user.id);
               
-            // Refresh profile data
+            if (updateError) {
+              console.error('Failed to update role directly:', updateError);
+              
+              // Try using RPC if direct update fails (assuming you've created this function)
+              try {
+                const { error: rpcError } = await supabase.rpc('update_user_role', {
+                  user_id: user.id,
+                  new_role: pendingRole
+                });
+                
+                if (rpcError) {
+                  console.error('Failed to update role via RPC:', rpcError);
+                  throw rpcError;
+                }
+              } catch (rpcErr) {
+                console.error('RPC call failed:', rpcErr);
+              }
+            }
+              
+            // Refresh profile data regardless of previous step results
             const { data } = await supabase
               .from('profiles')
               .select('*')
               .eq('id', user.id)
               .single();
               
+            console.log('Updated profile:', data);
             setProfile(data);
             
             // Clear the pending role if successful
-            localStorage.removeItem('intended_role');
+            if (data && data.role === pendingRole) {
+              localStorage.removeItem('intended_role');
+              console.log('Role updated successfully and pending role cleared');
+            } else {
+              console.log('Role still not updated correctly.');
+            }
           } catch (error) {
             console.error('Failed to apply pending role update:', error);
           }
@@ -118,6 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, role: 'student' | 'vendor' | 'admin') => {
     try {
+      console.log('Signing up with role:', role);
       // Store intended role in localStorage before signup
       localStorage.setItem('intended_role', role);
       
@@ -126,29 +154,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email, 
         password,
         options: {
-          data: { role }
+          data: { 
+            role: role,
+            // Adding these explicitly for clarity
+            first_name: '',
+            last_name: '',
+            intended_role: role
+          }
         }
       });
       
       if (error) {
+        console.error('Signup error:', error);
         localStorage.removeItem('intended_role');
         return { error };
       }
       
       // Try multiple approaches to update the role
       if (data?.user) {
+        console.log('User created:', data.user.id);
+        
         try {
-          // Attempt #1: Direct update (might fail due to RLS)
+          // Wait briefly for the trigger to create the profile
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Attempt #1: Direct update
           const { error: updateError } = await supabase
             .from('profiles')
             .update({ role })
             .eq('id', data.user.id);
             
           if (updateError) {
-            console.log('Direct update failed, will try after signin:', updateError);
+            console.log('Direct update failed:', updateError);
+          } else {
+            console.log('Direct update succeeded');
           }
           
-          // Attempt #2: Upsert approach (might work better)
+          // Attempt #2: Upsert approach
           const { error: upsertError } = await supabase
             .from('profiles')
             .upsert({
@@ -161,10 +203,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
             
           if (upsertError) {
-            console.log('Upsert approach failed, will try after signin:', upsertError);
+            console.log('Upsert approach failed:', upsertError);
+          } else {
+            console.log('Upsert succeeded');
           }
+          
+          // Attempt #3: Try RPC function if available
+          try {
+            const { error: rpcError } = await supabase.rpc('update_user_role', {
+              user_id: data.user.id,
+              new_role: role
+            });
+            
+            if (rpcError) {
+              console.log('RPC approach failed:', rpcError);
+            } else {
+              console.log('RPC update succeeded');
+            }
+          } catch (rpcErr) {
+            console.log('RPC call error:', rpcErr);
+          }
+          
         } catch (err) {
-          console.error('Failed to update role:', err);
+          console.error('Failed to update role during signup:', err);
           // We'll rely on localStorage approach on signin
         }
       }
@@ -173,7 +234,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error('Error during signup:', err);
       localStorage.removeItem('intended_role');
-      return { error: err };
+      return { error: err instanceof Error ? err : new Error('Unknown error during signup') };
     }
   };
 

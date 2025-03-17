@@ -1,7 +1,7 @@
 // app/dashboard/messages/page.tsx
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { formatDate, formatTime, truncateString } from '@/lib/utils';
+import { formatTime, truncateString } from '@/lib/utils';
 import { Send, ChevronRight } from 'lucide-react';
 
 interface Conversation {
@@ -61,6 +61,32 @@ export default function MessagesPage() {
   const [error, setError] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Define fetchMessages as a useCallback to avoid dependency issues
+  const fetchMessages = useCallback(async (conversationId: string) => {
+    try {
+      const { data, error: messagesError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+      
+      if (messagesError) throw messagesError;
+      
+      setMessages(data || []);
+      
+      // Mark unread messages as read
+      const unreadMessages = data?.filter(
+        m => m.sender_id !== profile?.id && !m.is_read
+      ) || [];
+      
+      for (const message of unreadMessages) {
+        await markMessageAsRead(message.id);
+      }
+    } catch (err: unknown) {
+      console.error('Error fetching messages:', err);
+    }
+  }, [profile?.id]);
   
   // Fetch conversations on initial load
   useEffect(() => {
@@ -116,16 +142,16 @@ export default function MessagesPage() {
             fetchMessages(selected.id);
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching conversations:', err);
-        setError('Failed to load conversations');
+        setError(err instanceof Error ? err.message : 'Failed to load conversations');
       }
     };
     
     if (profile) {
       fetchConversations();
     }
-  }, [profile, conversationId]);
+  }, [profile, conversationId, fetchMessages]);
   
   // Subscribe to new messages for the selected conversation
   useEffect(() => {
@@ -164,32 +190,6 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
   
-  // Fetch messages for a conversation
-  const fetchMessages = async (conversationId: string) => {
-    try {
-      const { data, error: messagesError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-      
-      if (messagesError) throw messagesError;
-      
-      setMessages(data || []);
-      
-      // Mark unread messages as read
-      const unreadMessages = data?.filter(
-        m => m.sender_id !== profile?.id && !m.is_read
-      ) || [];
-      
-      for (const message of unreadMessages) {
-        await markMessageAsRead(message.id);
-      }
-    } catch (err) {
-      console.error('Error fetching messages:', err);
-    }
-  };
-  
   // Mark a message as read
   const markMessageAsRead = async (messageId: string) => {
     try {
@@ -197,7 +197,7 @@ export default function MessagesPage() {
         .from('messages')
         .update({ is_read: true })
         .eq('id', messageId);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error marking message as read:', err);
     }
   };
@@ -210,7 +210,7 @@ export default function MessagesPage() {
     
     try {
       // Insert the new message
-      const { data, error: sendError } = await supabase
+      const { error: sendError } = await supabase
         .from('messages')
         .insert({
           conversation_id: selectedConversation.id,
@@ -233,9 +233,9 @@ export default function MessagesPage() {
       setMessageInput('');
       
       // The new message will be added via the subscription
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error sending message:', err);
-      setError('Failed to send message');
+      setError(err instanceof Error ? err.message : 'Failed to send message');
     } finally {
       setIsSending(false);
     }

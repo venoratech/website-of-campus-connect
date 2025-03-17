@@ -8,8 +8,20 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Eye, EyeOff } from 'lucide-react';
+
+interface ErrorWithMessage {
+  message: string;
+}
+
+function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as Record<string, unknown>).message === 'string'
+  );
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -18,7 +30,6 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const { signIn } = useAuth();
-  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,8 +47,9 @@ export default function LoginPage() {
       if (signInError) {
         setError(signInError.message);
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during login');
+    } catch (err: unknown) {
+      const errorMessage = isErrorWithMessage(err) ? err.message : 'An error occurred during login';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -102,7 +114,7 @@ export default function LoginPage() {
               {isLoading ? "Logging in..." : "Log in"}
             </Button>
             <div className="text-sm text-center text-gray-600">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link href="/signup" className="text-gray-800 font-medium hover:underline">
                 Sign up
               </Link>

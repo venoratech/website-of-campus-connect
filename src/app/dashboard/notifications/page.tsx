@@ -16,7 +16,13 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { formatDate, formatTime } from '@/lib/utils';
-import { Bell, Check, Link, ExternalLink } from 'lucide-react';
+import { Bell, Check, ExternalLink } from 'lucide-react';
+
+interface NotificationData {
+  order_id?: string;
+  conversation_id?: string;
+  transaction_id?: string;
+}
 
 interface Notification {
   id: string;
@@ -24,7 +30,7 @@ interface Notification {
   type: string;
   title: string;
   message: string;
-  data: any;
+  data: NotificationData;
   is_read: boolean;
   created_at: string;
 }
@@ -48,8 +54,9 @@ export default function NotificationsPage() {
         if (notificationsError) throw notificationsError;
         
         setNotifications(data || []);
-      } catch (err: any) {
-        setError(err.message || 'Error fetching notifications');
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : 'Error fetching notifications';
+        setError(errorMessage);
         console.error(err);
       }
     };
@@ -94,8 +101,9 @@ export default function NotificationsPage() {
       setNotifications(notifications.map(n => 
         n.id === notification.id ? { ...n, is_read: true } : n
       ));
-    } catch (err: any) {
-      setError(err.message || 'Error marking notification as read');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Error marking notification as read';
+      setError(errorMessage);
       console.error(err);
     } finally {
       setIsMarkingRead(false);
@@ -116,8 +124,9 @@ export default function NotificationsPage() {
       // Update local state
       setNotifications(notifications.map(n => ({ ...n, is_read: true })));
       setSuccess('All notifications marked as read');
-    } catch (err: any) {
-      setError(err.message || 'Error marking all notifications as read');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Error marking all notifications as read';
+      setError(errorMessage);
       console.error(err);
     } finally {
       setIsMarkingRead(false);
@@ -200,7 +209,7 @@ export default function NotificationsPage() {
           {notifications.length === 0 ? (
             <div className="py-8 text-center text-black">
               <Bell className="h-12 w-12 mx-auto text-gray-400 mb-2" />
-              <p>You don't have any notifications yet</p>
+              <p>You don&apos;t have any notifications yet</p>
             </div>
           ) : (
             <Table>

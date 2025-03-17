@@ -21,6 +21,26 @@ import {
 import { formatPrice } from '@/lib/utils';
 import { Users, ShoppingBag, DollarSign, TrendingUp } from 'lucide-react';
 
+// Define interfaces for data structures
+interface FoodOrder {
+  id: string;
+  vendor_id: string;
+  created_at: string;
+  status: string;
+  total: number;
+}
+
+interface WeeklyChartData {
+  name: string;
+  orders: number;
+}
+
+interface StatusChartData {
+  name: string;
+  value: number;
+  percentage: number;
+}
+
 // Helper to group orders by day of week
 const getDayOfWeek = (dateString: string) => {
   const date = new Date(dateString);
@@ -29,7 +49,7 @@ const getDayOfWeek = (dateString: string) => {
 };
 
 // Order data transform function
-const transformOrdersToWeeklyData = (orders: any[]) => {
+const transformOrdersToWeeklyData = (orders: FoodOrder[]): WeeklyChartData[] => {
   // Initialize counts for all days of the week
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const initialCounts = daysOfWeek.reduce((acc, day) => {
@@ -51,7 +71,7 @@ const transformOrdersToWeeklyData = (orders: any[]) => {
 };
 
 // Status data transform function
-const transformOrdersByStatus = (orders: any[]) => {
+const transformOrdersByStatus = (orders: FoodOrder[]): StatusChartData[] => {
   // Count orders by status
   const statusCounts: Record<string, number> = {};
   
@@ -81,10 +101,10 @@ const STATUS_COLORS = {
 
 export default function Dashboard() {
   const { profile, isLoading } = useAuth();
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<FoodOrder[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
-  const [weeklyOrderData, setWeeklyOrderData] = useState<any[]>([]);
-  const [statusData, setStatusData] = useState<any[]>([]);
+  const [weeklyOrderData, setWeeklyOrderData] = useState<WeeklyChartData[]>([]);
+  const [statusData, setStatusData] = useState<StatusChartData[]>([]);
   const [prevMonthOrders, setPrevMonthOrders] = useState(0);
   const [prevMonthRevenue, setPrevMonthRevenue] = useState(0);
 

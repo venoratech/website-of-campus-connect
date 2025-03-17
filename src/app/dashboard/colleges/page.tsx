@@ -1,13 +1,14 @@
 // app/dashboard/colleges/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, College } from '@/lib/supabase';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import Image from 'next/image';
 import {
   Table,
   TableBody,
@@ -27,7 +28,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { formatDate } from '@/lib/utils';
-import { PlusCircle, Edit, Trash, Building, MapPin } from 'lucide-react';
+import { PlusCircle, Edit, Trash, MapPin } from 'lucide-react';
 
 export default function CollegesPage() {
   const { profile, isLoading } = useAuth();
@@ -35,7 +36,7 @@ export default function CollegesPage() {
   const [isAddingCollege, setIsAddingCollege] = useState(false);
   const [editingCollegeId, setEditingCollegeId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Form state
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
@@ -45,10 +46,12 @@ export default function CollegesPage() {
   const [country, setCountry] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [websiteUrl, setWebsiteUrl] = useState('');
-  
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const fetchColleges = async () => {
@@ -62,12 +65,12 @@ export default function CollegesPage() {
           .from('colleges')
           .select('*')
           .order('name');
-        
+
         if (collegesError) throw collegesError;
-        
+
         setColleges(data || []);
-      } catch (err: any) {
-        setError(err.message || 'Error fetching colleges');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Error fetching colleges');
         console.error(err);
       }
     };
@@ -91,7 +94,6 @@ export default function CollegesPage() {
 
   const handleEditCollege = (college: College) => {
     setEditingCollegeId(college.id);
-    
     setName(college.name);
     setAddress(college.address);
     setCity(college.city);
@@ -100,7 +102,6 @@ export default function CollegesPage() {
     setCountry(college.country);
     setLogoUrl(college.logo_url || '');
     setWebsiteUrl(college.website_url || '');
-    
     setIsAddingCollege(true);
   };
 
@@ -128,43 +129,36 @@ export default function CollegesPage() {
       };
 
       if (editingCollegeId) {
-        // Update existing college
         const { error: updateError } = await supabase
           .from('colleges')
           .update(collegeData)
           .eq('id', editingCollegeId);
-        
+
         if (updateError) throw updateError;
-        
+
         setSuccess('College updated successfully');
-        
-        // Update local state
-        setColleges(colleges.map(college => 
+        setColleges(colleges.map(college =>
           college.id === editingCollegeId ? { ...college, ...collegeData } : college
         ));
       } else {
-        // Create new college
         const { data, error: insertError } = await supabase
           .from('colleges')
           .insert(collegeData)
           .select()
           .single();
-        
+
         if (insertError) throw insertError;
-        
+
         setSuccess('College added successfully');
-        
-        // Update local state
         if (data) {
           setColleges([...colleges, data]);
         }
       }
 
-      // Reset form
       resetForm();
       setIsAddingCollege(false);
-    } catch (err: any) {
-      setError(err.message || 'Error saving college');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error saving college');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -178,23 +172,84 @@ export default function CollegesPage() {
 
     setIsSubmitting(true);
     setError(null);
-    
+
     try {
       const { error: deleteError } = await supabase
         .from('colleges')
         .delete()
         .eq('id', id);
-      
+
       if (deleteError) throw deleteError;
-      
+
       setSuccess('College deleted successfully');
-      
-      // Update local state
       setColleges(colleges.filter(college => college.id !== id));
-    } catch (err: any) {
-      setError(err.message || 'Error deleting college');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error deleting college');
       console.error(err);
     } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        setError('Please drop an image file');
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setError('File is too large. Maximum size is 5MB.');
+        return;
+      }
+      setIsSubmitting(true);
+      const fileName = `${Date.now()}-${file.name}`;
+      const { error } = await supabase.storage
+        .from('college-logos')
+        .upload(fileName, file);
+
+      if (error) {
+        console.error('Error uploading file:', error);
+        setError('Error uploading logo');
+      } else {
+        const { data: urlData } = supabase.storage
+          .from('college-logos')
+          .getPublicUrl(fileName);
+        setLogoUrl(urlData.publicUrl);
+        setSuccess('Logo uploaded successfully');
+      }
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        setError('Please select an image file');
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setError('File is too large. Maximum size is 5MB.');
+        return;
+      }
+      setIsSubmitting(true);
+      const fileName = `${Date.now()}-${file.name}`;
+      const { error } = await supabase.storage
+        .from('college-logos')
+        .upload(fileName, file);
+
+      if (error) {
+        console.error('Error uploading file:', error);
+        setError('Error uploading logo');
+      } else {
+        const { data: urlData } = supabase.storage
+          .from('college-logos')
+          .getPublicUrl(fileName);
+        setLogoUrl(urlData.publicUrl);
+        setSuccess('Logo uploaded successfully');
+      }
       setIsSubmitting(false);
     }
   };
@@ -224,9 +279,7 @@ export default function CollegesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-black">Colleges</h1>
-          <p className="text-black">
-            Manage colleges and educational institutions
-          </p>
+          <p className="text-black">Manage colleges and educational institutions</p>
         </div>
         <Dialog open={isAddingCollege} onOpenChange={setIsAddingCollege}>
           <DialogTrigger asChild>
@@ -254,7 +307,6 @@ export default function CollegesPage() {
                   className="bg-white text-black border-gray-300"
                 />
               </div>
-              
               <div className="space-y-2">
                 <Label htmlFor="address" className="text-black font-medium">Address*</Label>
                 <Input
@@ -266,7 +318,6 @@ export default function CollegesPage() {
                   className="bg-white text-black border-gray-300"
                 />
               </div>
-              
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="city" className="text-black font-medium">City*</Label>
@@ -291,7 +342,6 @@ export default function CollegesPage() {
                   />
                 </div>
               </div>
-              
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="zipCode" className="text-black font-medium">Zip/Postal Code*</Label>
@@ -304,7 +354,6 @@ export default function CollegesPage() {
                     className="bg-white text-black border-gray-300"
                   />
                 </div>
-                
                 <div className="space-y-2">
                   <Label htmlFor="country" className="text-black font-medium">Country*</Label>
                   <Input
@@ -317,18 +366,57 @@ export default function CollegesPage() {
                   />
                 </div>
               </div>
-              
               <div className="space-y-2">
-                <Label htmlFor="logoUrl" className="text-black font-medium">Logo URL</Label>
-                <Input
-                  id="logoUrl"
-                  value={logoUrl}
-                  onChange={(e) => setLogoUrl(e.target.value)}
-                  placeholder="https://example.com/logo.png"
-                  className="bg-white text-black border-gray-300"
-                />
+                <Label className="text-black font-medium">Logo</Label>
+                <div className="flex items-center space-x-4">
+                  {logoUrl && (
+                    <div className="relative h-16 w-16 border border-gray-300 rounded overflow-hidden">
+                      <Image
+                        src={logoUrl}
+                        alt="College logo"
+                        width={64}
+                        height={64}
+                        className="object-contain"
+                      />
+                    </div>
+                  )}
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1 border-2 border-dashed border-gray-300 p-4 text-center cursor-pointer hover:border-gray-400"
+                  >
+                    <p className="text-black">Drag and drop logo here or click to upload</p>
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                    ref={fileInputRef}
+                  />
+                </div>
+                {logoUrl && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setLogoUrl('')}
+                    className="mt-2 border-gray-300 text-black hover:bg-gray-100"
+                  >
+                    Remove logo
+                  </Button>
+                )}
+                <div className="mt-2">
+                  <Label htmlFor="logoUrl" className="text-black font-medium">Or enter logo URL</Label>
+                  <Input
+                    id="logoUrl"
+                    value={logoUrl}
+                    onChange={(e) => setLogoUrl(e.target.value)}
+                    placeholder="https://example.com/logo.png"
+                    className="bg-white text-black border-gray-300"
+                  />
+                </div>
               </div>
-              
               <div className="space-y-2">
                 <Label htmlFor="websiteUrl" className="text-black font-medium">Website URL</Label>
                 <Input
@@ -341,8 +429,8 @@ export default function CollegesPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   resetForm();
                   setIsAddingCollege(false);
@@ -351,9 +439,9 @@ export default function CollegesPage() {
               >
                 Cancel
               </Button>
-              <Button 
-                type="button" 
-                onClick={handleSaveCollege} 
+              <Button
+                type="button"
+                onClick={handleSaveCollege}
                 disabled={isSubmitting}
                 className="bg-gray-800 hover:bg-black text-white"
               >
@@ -415,11 +503,15 @@ export default function CollegesPage() {
                   <TableRow key={college.id} className="border-gray-200">
                     <TableCell className="font-medium flex items-center text-black">
                       {college.logo_url && (
-                        <img 
-                          src={college.logo_url} 
-                          alt={`${college.name} logo`} 
-                          className="h-8 w-8 rounded mr-2 object-contain"
-                        />
+                        <div className="relative h-8 w-8 mr-2 rounded overflow-hidden">
+                          <Image
+                            src={college.logo_url}
+                            alt={`${college.name} logo`}
+                            width={32}
+                            height={32}
+                            className="object-contain"
+                          />
+                        </div>
                       )}
                       <span>{college.name}</span>
                     </TableCell>
@@ -431,9 +523,9 @@ export default function CollegesPage() {
                     </TableCell>
                     <TableCell className="text-black">
                       {college.website_url ? (
-                        <a 
-                          href={college.website_url} 
-                          target="_blank" 
+                        <a
+                          href={college.website_url}
+                          target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-700 hover:underline"
                         >

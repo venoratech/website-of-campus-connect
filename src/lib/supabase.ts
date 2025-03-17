@@ -23,10 +23,11 @@ export type Profile = {
   business_name?: string | null;
   business_description?: string | null;
   business_logo_url?: string | null;
-  business_hours?: Record<string, any> | null;
+  business_hours?: Record<string, string | boolean | number>; // More specific type
   is_approved?: boolean;
-  is_active?: boolean; // Add this line
-
+  is_active?: boolean;
+  is_id_verified: boolean | null;
+  id_image_url: string | null;
 };
 
 export type College = {
@@ -52,7 +53,7 @@ export type FoodVendor = {
   college_id: string;
   logo_url: string | null;
   banner_url: string | null;
-  business_hours: Record<string, any> | null;
+  business_hours: Record<string, string | boolean | number> | null; // More specific type
   average_preparation_time: number | null;
   is_active: boolean;
   created_at: string;

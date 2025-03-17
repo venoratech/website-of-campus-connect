@@ -28,11 +28,111 @@ import { formatDate, formatTime, formatPrice } from '@/lib/utils';
 import { Eye, ArrowRight, Check, Coffee, Clock } from 'lucide-react';
 import useInterval from '@/lib/useInterval';
 
+
+interface MenuItemRaw {
+  id?: string;
+  name?: string;
+  image_url?: string;
+}
+
+interface OrderItemRaw {
+  id?: string;
+  quantity?: number;
+  unit_price?: number;
+  subtotal?: number;
+  special_instructions?: string;
+  menu_items?: MenuItemRaw | MenuItemRaw[];
+}
+
+interface CustomerRaw {
+  id?: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+}
+
+interface MenuItem {
+  id: string;
+  name: string;
+  image_url: string;
+}
+
+interface OrderItem {
+  id: string;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  special_instructions?: string;
+  menu_items: MenuItem;
+}
+
+interface Customer {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
 type OrderWithDetails = {
   order: FoodOrder;
-  orderItems: any[];
-  customer: any;
+  orderItems: OrderItem[];
+  customer: Customer | null;
   vendorName: string;
+};
+
+interface ErrorWithMessage {
+  message: string;
+}
+
+function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as Record<string, unknown>).message === 'string'
+  );
+}
+
+// Convert types for Supabase query results
+const convertMenuItems = (menuItemsArray: MenuItemRaw | MenuItemRaw[]): MenuItem => {
+  // If menu_items is an array (as in the error message), extract first item
+  if (Array.isArray(menuItemsArray)) {
+    const firstItem = menuItemsArray[0] || {};
+    return {
+      id: firstItem.id || '',
+      name: firstItem.name || '',
+      image_url: firstItem.image_url || ''
+    };
+  }
+  
+  // If it's already an object, ensure it has the right shape
+  return {
+    id: menuItemsArray?.id || '',
+    name: menuItemsArray?.name || '',
+    image_url: menuItemsArray?.image_url || ''
+  };
+};
+
+const convertOrderItem = (item: OrderItemRaw): OrderItem => {
+  return {
+    id: item.id || '',
+    quantity: item.quantity || 0,
+    unit_price: item.unit_price || 0,
+    subtotal: item.subtotal || 0,
+    special_instructions: item.special_instructions,
+    menu_items: convertMenuItems(item.menu_items || {})
+  };
+};
+
+const convertCustomer = (customer: CustomerRaw | null): Customer | null => {
+  if (!customer) return null;
+  
+  return {
+    id: customer.id || '',
+    email: customer.email || '',
+    first_name: customer.first_name || '',
+    last_name: customer.last_name || ''
+  };
 };
 
 export default function OrdersPage() {
@@ -76,28 +176,30 @@ export default function OrdersPage() {
         
         if (ordersError) throw ordersError;
         
-        const ordersWithDetails = await Promise.all(ordersData.map(async (order) => {
-          const { data: customerData } = await supabase
-            .from('profiles')
-            .select('id, email, first_name, last_name')
-            .eq('id', order.customer_id)
-            .single();
-          
-          const { data: orderItemsData } = await supabase
-            .from('order_items')
-            .select(`
-              id, quantity, unit_price, subtotal, special_instructions,
-              menu_items (id, name, image_url)
-            `)
-            .eq('order_id', order.id);
-          
-          return {
-            order,
-            orderItems: orderItemsData || [],
-            customer: customerData || null,
-            vendorName: vendorData.vendor_name
-          };
-        }));
+        const ordersWithDetails: OrderWithDetails[] = await Promise.all(
+          ordersData.map(async (order) => {
+            const { data: customerData } = await supabase
+              .from('profiles')
+              .select('id, email, first_name, last_name')
+              .eq('id', order.customer_id)
+              .single();
+            
+            const { data: orderItemsData } = await supabase
+              .from('order_items')
+              .select(`
+                id, quantity, unit_price, subtotal, special_instructions,
+                menu_items (id, name, image_url)
+              `)
+              .eq('order_id', order.id);
+            
+            return {
+              order,
+              orderItems: (orderItemsData || []).map(convertOrderItem),
+              customer: convertCustomer(customerData),
+              vendorName: vendorData.vendor_name
+            };
+          })
+        );
         
         setOrders(ordersWithDetails);
         setLastFetchTime(new Date());
@@ -109,42 +211,45 @@ export default function OrdersPage() {
         
         if (ordersError) throw ordersError;
         
-        const ordersWithDetails = await Promise.all(ordersData.map(async (order) => {
-          const { data: customerData } = await supabase
-            .from('profiles')
-            .select('id, email, first_name, last_name')
-            .eq('id', order.customer_id)
-            .single();
-          
-          const { data: vendorData } = await supabase
-            .from('food_vendors')
-            .select('vendor_name')
-            .eq('id', order.vendor_id)
-            .single();
-          
-          const { data: orderItemsData } = await supabase
-            .from('order_items')
-            .select(`
-              id, quantity, unit_price, subtotal, special_instructions,
-              menu_items (id, name, image_url)
-            `)
-            .eq('order_id', order.id);
-          
-          return {
-            order,
-            orderItems: orderItemsData || [],
-            customer: customerData || null,
-            vendorName: vendorData?.vendor_name || 'Unknown Vendor'
-          };
-        }));
+        const ordersWithDetails: OrderWithDetails[] = await Promise.all(
+          ordersData.map(async (order) => {
+            const { data: customerData } = await supabase
+              .from('profiles')
+              .select('id, email, first_name, last_name')
+              .eq('id', order.customer_id)
+              .single();
+            
+            const { data: vendorData } = await supabase
+              .from('food_vendors')
+              .select('vendor_name')
+              .eq('id', order.vendor_id)
+              .single();
+            
+            const { data: orderItemsData } = await supabase
+              .from('order_items')
+              .select(`
+                id, quantity, unit_price, subtotal, special_instructions,
+                menu_items (id, name, image_url)
+              `)
+              .eq('order_id', order.id);
+            
+            return {
+              order,
+              orderItems: (orderItemsData || []).map(convertOrderItem),
+              customer: convertCustomer(customerData),
+              vendorName: vendorData?.vendor_name || 'Unknown Vendor'
+            };
+          })
+        );
         
         setOrders(ordersWithDetails);
         setLastFetchTime(new Date());
       } else {
         setError('You do not have permission to view orders');
       }
-    } catch (err: any) {
-      setError(err.message || 'Error fetching orders');
+    } catch (err: unknown) {
+      const errorMessage = isErrorWithMessage(err) ? err.message : 'Error fetching orders';
+      setError(errorMessage);
       console.error(err);
     }
   };
@@ -153,7 +258,7 @@ export default function OrdersPage() {
     if (profile) {
       fetchData();
     }
-  }, [profile]);
+  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useInterval(() => {
     if (profile) {
@@ -176,9 +281,18 @@ export default function OrdersPage() {
     setSuccess(null);
 
     try {
+      // Validate that newStatus is one of the allowed values
+      const validStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
+      if (!validStatuses.includes(newStatus)) {
+        throw new Error(`Invalid status: ${newStatus}`);
+      }
+
       const { error: updateError } = await supabase
         .from('food_orders')
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .update({ 
+          status: newStatus as 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled',
+          updated_at: new Date().toISOString() 
+        })
         .eq('id', order.id);
 
       if (updateError) throw updateError;
@@ -187,18 +301,28 @@ export default function OrdersPage() {
 
       setOrders(orders.map(o => 
         o.order.id === order.id 
-          ? { ...o, order: { ...o.order, status: newStatus as any }} 
+          ? { 
+              ...o, 
+              order: { 
+                ...o.order, 
+                status: newStatus as 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled'
+              } 
+            } 
           : o
       ));
 
       if (selectedOrder && selectedOrder.order.id === order.id) {
         setSelectedOrder({
           ...selectedOrder,
-          order: { ...selectedOrder.order, status: newStatus as any }
+          order: { 
+            ...selectedOrder.order, 
+            status: newStatus as 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled'
+          }
         });
       }
-    } catch (err: any) {
-      setError(err.message || 'Error updating order status');
+    } catch (err: unknown) {
+      const errorMessage = isErrorWithMessage(err) ? err.message : 'Error updating order status';
+      setError(errorMessage);
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -226,18 +350,6 @@ export default function OrdersPage() {
     };
     const config = statusConfig[status as keyof typeof statusConfig] || { color: 'border-blue-400 bg-blue-50 text-blue-700', label: status };
     return <Badge className={`${config.color} border`}>{config.label}</Badge>;
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'pending': return <Clock className="h-5 w-5 text-yellow-500" />;
-      case 'confirmed': return <Check className="h-5 w-5 text-blue-500" />;
-      case 'preparing': return <Coffee className="h-5 w-5 text-purple-500" />;
-      case 'ready': return <Check className="h-5 w-5 text-green-500" />;
-      case 'completed': return <Check className="h-5 w-5 text-gray-500" />;
-      case 'cancelled': return <Check className="h-5 w-5 text-red-500" />;
-      default: return null;
-    }
   };
 
   const filteredOrders = orders.filter(o => {
@@ -614,7 +726,6 @@ export default function OrdersPage() {
                   <p className="mt-1 text-black">{formatDate(selectedOrder.order.scheduled_pickup_time)} at {formatTime(selectedOrder.order.scheduled_pickup_time)}</p>
                 </div>
               )}
-
               <div className="flex justify-end space-x-2">
                 {selectedOrder.order.status !== 'completed' && selectedOrder.order.status !== 'cancelled' && (
                   <>

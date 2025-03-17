@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Clock, MapPin, Phone, Mail, Globe, Camera } from 'lucide-react';
+import { Clock, MapPin } from 'lucide-react';
 
 interface BusinessHours {
   monday: { open: string; close: string; closed: boolean };
@@ -228,8 +228,8 @@ export default function VendorProfilePage() {
         setLogoFile(null); // Reset file after successful upload
         setBannerFile(null); // Reset file after successful upload
       }
-    } catch (err: any) {
-      setError(err.message || 'Error saving vendor profile');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error saving vendor profile');
       console.error(err);
     } finally {
       setIsSubmitting(false);

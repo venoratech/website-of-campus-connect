@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,7 +29,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { formatPrice, formatDate } from '@/lib/utils';
-import { PlusCircle, Edit, Trash, CheckCircle2, XCircle } from 'lucide-react';
+import { PlusCircle, Edit, Trash } from 'lucide-react';
 
 interface Promotion {
   id: string;
@@ -50,9 +50,16 @@ interface Promotion {
   updated_at: string;
 }
 
+interface Vendor {
+  id: string;
+  profile_id: string;
+  vendor_name: string;
+  [key: string]: string | number | boolean | null | undefined; // Specify possible value types
+}
+
 export default function PromotionsPage() {
   const { profile, isLoading } = useAuth();
-  const [vendor, setVendor] = useState<any>(null);
+  const [vendor, setVendor] = useState<Vendor | null>(null);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [isAddingPromotion, setIsAddingPromotion] = useState(false);
   const [editingPromotionId, setEditingPromotionId] = useState<string | null>(null);
@@ -173,6 +180,10 @@ export default function PromotionsPage() {
     }
 
     try {
+      if (!vendor) {
+        throw new Error('Vendor information is missing');
+      }
+
       const promotionData = {
         vendor_id: vendor.id,
         name,
@@ -231,8 +242,8 @@ export default function PromotionsPage() {
       // Reset form
       resetForm();
       setIsAddingPromotion(false);
-    } catch (err: any) {
-      setError(err.message || 'Error saving promotion');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error saving promotion');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -259,8 +270,8 @@ export default function PromotionsPage() {
       
       // Update local state
       setPromotions(promotions.filter(promo => promo.id !== id));
-    } catch (err: any) {
-      setError(err.message || 'Error deleting promotion');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error deleting promotion');
       console.error(err);
     } finally {
       setIsSubmitting(false);

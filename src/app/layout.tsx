@@ -1,9 +1,10 @@
 // app/layout.tsx
 import './globals.css'
-import { Inter } from 'next/font/google'
 import { AuthProvider } from '@/contexts/AuthContext'
 
-const inter = Inter({ subsets: ['latin'] })
+// Remove the Google font import
+// import { Inter } from 'next/font/google'
+// const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
   title: 'College Marketplace Admin',
@@ -17,7 +18,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      {/* Remove the inter.className reference */}
+      <body>
         <AuthProvider>
           {children}
         </AuthProvider>

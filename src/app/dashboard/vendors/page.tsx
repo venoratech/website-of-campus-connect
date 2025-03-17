@@ -28,10 +28,44 @@ import { formatDate } from '@/lib/utils';
 import { Eye, CheckCircle, XCircle, User, Edit } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+// Define interfaces for our data types
+interface Profile {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone_number: string | null;
+  is_approved: boolean;
+  role: string;
+  business_name?: string | null;
+  business_description?: string | null;
+  created_at: string;
+  [key: string]: unknown; // Changed from any to unknown
+}
+
+interface College {
+  id: string;
+  name: string;
+}
+
+interface FoodVendor {
+  id: string;
+  profile_id: string;
+  vendor_name: string;
+  description: string | null;
+  location: string;
+  college_id: string;
+  is_active: boolean;
+  created_at: string;
+  college?: College;
+  profile?: Profile;
+  [key: string]: unknown; // Changed from any to unknown
+}
+
 export default function VendorsPage() {
   const { profile, isLoading } = useAuth();
-  const [vendors, setVendors] = useState<any[]>([]);
-  const [selectedVendor, setSelectedVendor] = useState<any | null>(null);
+  const [vendors, setVendors] = useState<FoodVendor[]>([]);
+  const [selectedVendor, setSelectedVendor] = useState<FoodVendor | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -100,12 +134,12 @@ export default function VendorsPage() {
             is_active: false,
             profile
           }))
-        ];
+        ] as FoodVendor[];
         
         setVendors(combinedVendors);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching vendors:', err);
-        setError(err.message || 'Error fetching vendors');
+        setError(err instanceof Error ? err.message : 'Error fetching vendors');
       }
     };
     
@@ -114,7 +148,7 @@ export default function VendorsPage() {
     }
   }, [profile]);
 
-  const handleViewVendor = (vendor: any) => {
+  const handleViewVendor = (vendor: FoodVendor) => {
     setSelectedVendor(vendor);
     setViewVendorOpen(true);
     setIsEditing(false);
@@ -201,19 +235,19 @@ export default function VendorsPage() {
         profile: selectedVendor.profile ? {
           ...selectedVendor.profile,
           is_approved: editIsApproved
-        } : null
+        } : undefined
       });
       
       setIsEditing(false);
-    } catch (err: any) {
-      setError(err.message || 'Error updating vendor');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error updating vendor');
       console.error(err);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleApproveVendor = async (vendorProfile: any) => {
+  const handleApproveVendor = async (vendorProfile: Profile) => {
     if (!confirm('Are you sure you want to approve this vendor?')) {
       return;
     }
@@ -256,21 +290,21 @@ export default function VendorsPage() {
            (selectedVendor.profile && selectedVendor.profile.id === vendorProfile.id))) {
         setSelectedVendor({
           ...selectedVendor,
-          profile: {
+          profile: selectedVendor.profile ? {
             ...selectedVendor.profile,
             is_approved: true
-          }
+          } : undefined
         });
       }
-    } catch (err: any) {
-      setError(err.message || 'Error approving vendor');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error approving vendor');
       console.error(err);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleRejectVendor = async (vendorProfile: any) => {
+  const handleRejectVendor = async (vendorProfile: Profile) => {
     if (!confirm('Are you sure you want to reject this vendor? This action cannot be undone.')) {
       return;
     }
@@ -313,21 +347,21 @@ export default function VendorsPage() {
            (selectedVendor.profile && selectedVendor.profile.id === vendorProfile.id))) {
         setSelectedVendor({
           ...selectedVendor,
-          profile: {
+          profile: selectedVendor.profile ? {
             ...selectedVendor.profile,
             is_approved: false
-          }
+          } : undefined
         });
       }
-    } catch (err: any) {
-      setError(err.message || 'Error rejecting vendor');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error rejecting vendor');
       console.error(err);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const toggleVendorStatus = async (vendor: any) => {
+  const toggleVendorStatus = async (vendor: FoodVendor) => {
     if (!vendor.id) {
       setError('Cannot toggle status for vendor without a complete profile');
       return;
@@ -360,8 +394,8 @@ export default function VendorsPage() {
           is_active: newStatus
         });
       }
-    } catch (err: any) {
-      setError(err.message || 'Error toggling vendor status');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error toggling vendor status');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -383,13 +417,13 @@ export default function VendorsPage() {
     // Apply status filter
     let statusMatches = true;
     if (statusFilter === 'active') {
-      statusMatches = vendor.is_active === true;
+      statusMatches = !!vendor.is_active;
     } else if (statusFilter === 'inactive') {
-      statusMatches = vendor.id && vendor.is_active === false;
+      statusMatches = !!vendor.id && vendor.is_active === false;
     } else if (statusFilter === 'pending') {
-      statusMatches = vendor.profile && vendor.profile.is_approved === false;
+      statusMatches = !!vendor.profile && vendor.profile.is_approved === false;
     } else if (statusFilter === 'incomplete') {
-      statusMatches = !vendor.id && vendor.profile;
+      statusMatches = !vendor.id && vendor.profile !== undefined;
     }
     
     return searchMatches && statusMatches;
@@ -399,11 +433,7 @@ export default function VendorsPage() {
     v.profile && v.profile.is_approved === false
   ).length;
 
-  const incompleteCount = vendors.filter(v => 
-    !v.id && v.profile
-  ).length;
-
-  const getVendorStatus = (vendor: any) => {
+  const getVendorStatus = (vendor: FoodVendor) => {
     if (!vendor.profile) return 'Unknown';
     
     if (vendor.profile.is_approved === false) {
@@ -426,7 +456,7 @@ export default function VendorsPage() {
   }
 
   if (profile?.role !== 'admin') {
-            return (
+    return (
       <div className="p-4">
         <h1 className="text-xl font-bold text-black">Access Denied</h1>
         <p className="text-black">Only administrators can access this page.</p>
@@ -570,7 +600,7 @@ export default function VendorsPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleApproveVendor(vendor.profile)}
+                              onClick={() => handleApproveVendor(vendor.profile!)}
                               disabled={isSubmitting}
                               className="text-black hover:bg-gray-100"
                             >
@@ -579,7 +609,7 @@ export default function VendorsPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleRejectVendor(vendor.profile)}
+                              onClick={() => handleRejectVendor(vendor.profile!)}
                               disabled={isSubmitting}
                               className="text-black hover:bg-gray-100"
                             >
@@ -790,7 +820,7 @@ export default function VendorsPage() {
                     {selectedVendor.profile && selectedVendor.profile.is_approved === false && (
                       <Button
                         onClick={() => {
-                          handleApproveVendor(selectedVendor.profile);
+                          handleApproveVendor(selectedVendor.profile!);
                           setViewVendorOpen(false);
                         }}
                         disabled={isSubmitting}

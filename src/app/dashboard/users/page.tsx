@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+// Remove unused router import
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, Profile } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,12 +26,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { formatDate } from '@/lib/utils';
-import { Eye, Edit, User, UserX, CheckCircle, XCircle } from 'lucide-react';
+import { Eye, Edit, User, UserX } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import Image from 'next/image'; // Import Next.js Image component
 
 export default function UsersPage() {
   const { profile, isLoading } = useAuth();
-  const router = useRouter();
+  // Remove unused router
   const [users, setUsers] = useState<Profile[]>([]);
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -41,62 +42,38 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [viewUserOpen, setViewUserOpen] = useState(false);
-  
+
   // Edit form state
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
   const [editRole, setEditRole] = useState<'student' | 'vendor' | 'admin'>('student');
   const [editIsApproved, setEditIsApproved] = useState(false);
+  const [editIsIdVerified, setEditIsIdVerified] = useState(false);
 
   useEffect(() => {
     const fetchUsers = async () => {
-      // Only fetch users if the current user is an admin
-      if (!profile) return;
-      
-      if (profile.role !== 'admin') {
+      if (!profile || profile.role !== 'admin') {
         setError('Only administrators can access this page');
         return;
       }
 
       try {
-        // Debug to console - this will show in browser dev tools
-        console.log('Fetching users as admin with role:', profile.role);
-        
-        // Temporarily log the current user to verify their admin status
-        console.log('Current user:', profile);
-        
-        // Fetch ALL users with explicit debugging
+        // Use direct Supabase call instead of API route to avoid auth issues
         const { data, error: usersError } = await supabase
           .from('profiles')
           .select('*')
           .order('created_at', { ascending: false });
-        
-        if (usersError) {
-          console.error('Supabase error:', usersError);
-          throw usersError;
-        }
-        
-        if (!data || data.length === 0) {
-          console.log('No users found in the database');
-          setError('No users found in the database. Please check your database connection.');
-        } else {
-          console.log(`Found ${data.length} users:`, data);
-          // Additional debugging - check if user roles exist
-          const roles = data.map(user => user.role);
-          const uniqueRoles = [...new Set(roles)];
-          console.log('User roles found:', uniqueRoles);
-        }
-        
+
+        if (usersError) throw usersError;
         setUsers(data || []);
-      } catch (err: any) {
-        setError(err.message || 'Error fetching users');
+      } catch (err: unknown) { // Replace any with unknown
+        const errorMessage = err instanceof Error ? err.message : 'Error fetching users';
+        setError(errorMessage);
         console.error(err);
       }
     };
 
-    if (!isLoading) {
-      fetchUsers();
-    }
+    if (!isLoading) fetchUsers();
   }, [profile, isLoading]);
 
   const handleViewUser = (user: Profile) => {
@@ -106,60 +83,88 @@ export default function UsersPage() {
 
   const handleEditUser = () => {
     if (!selectedUser) return;
-    
     setEditFirstName(selectedUser.first_name || '');
     setEditLastName(selectedUser.last_name || '');
     setEditRole(selectedUser.role);
     setEditIsApproved(selectedUser.is_approved || false);
+    setEditIsIdVerified(selectedUser.is_id_verified || false);
     setIsEditing(true);
   };
 
   const handleSaveUser = async () => {
     if (!selectedUser || profile?.role !== 'admin') return;
-    
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
-
+  
     try {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({
-          first_name: editFirstName,
-          last_name: editLastName,
+      console.log("Attempting to update user:", {
+        id: selectedUser.id,
+        firstName: editFirstName,
+        lastName: editLastName,
+        role: editRole,
+        isApproved: editIsApproved,
+        isIdVerified: editIsIdVerified
+      });
+  
+      // Use the server API route to bypass RLS policies
+      const response = await fetch('/api/update-user-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: selectedUser.id,
+          firstName: editFirstName,
+          lastName: editLastName,
           role: editRole,
-          is_approved: editIsApproved,
-        })
-        .eq('id', selectedUser.id);
+          isApproved: editIsApproved,
+          isIdVerified: editIsIdVerified
+        }),
+      });
       
-      if (updateError) throw updateError;
+      const result = await response.json();
       
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to update user');
+      }
+  
+      console.log("Update successful:", result);
       setSuccess('User updated successfully');
-      
+  
       // Update local state
-      setUsers(users.map(u => 
+      setUsers(users.map(u =>
         u.id === selectedUser.id ? {
           ...u,
           first_name: editFirstName,
           last_name: editLastName,
           role: editRole,
           is_approved: editIsApproved,
+          is_id_verified: editIsIdVerified,
         } : u
       ));
-      
-      // Update selected user
+  
       setSelectedUser({
         ...selectedUser,
         first_name: editFirstName,
         last_name: editLastName,
         role: editRole,
         is_approved: editIsApproved,
+        is_id_verified: editIsIdVerified,
       });
-      
       setIsEditing(false);
-    } catch (err: any) {
-      setError(err.message || 'Error updating user');
-      console.error(err);
+    } catch (err: unknown) { // Replace any with unknown
+      console.error('Full error object:', err);
+      let errorMessage = 'Error updating user';
+      
+      // Try to extract meaningful error message
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'object' && err !== null) {
+        errorMessage = JSON.stringify(err);
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -167,37 +172,39 @@ export default function UsersPage() {
 
   const handleDeactivateUser = async (userId: string) => {
     if (profile?.role !== 'admin') return;
-    
-    if (!confirm('Are you sure you want to deactivate this user? They will no longer be able to log in.')) {
-      return;
-    }
+    if (!confirm('Are you sure you want to deactivate this user? They will no longer be able to log in.')) return;
 
     setIsSubmitting(true);
     setError(null);
-    
+
     try {
-      // In a real application, you'd use Supabase Auth Admin APIs to disable the user
-      // For now, we'll just simulate it by updating a field
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ is_active: false })
-        .eq('id', userId);
+      // Use the server API route to deactivate user
+      const response = await fetch('/api/deactivate-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId }),
+      });
       
-      if (updateError) throw updateError;
+      const result = await response.json();
       
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to deactivate user');
+      }
+
       setSuccess('User deactivated successfully');
-      
-      // Update local state
-      setUsers(users.map(u => 
+
+      setUsers(users.map(u =>
         u.id === userId ? { ...u, is_active: false } : u
       ));
-      
-      // Update selected user if needed
+
       if (selectedUser && selectedUser.id === userId) {
         setSelectedUser({ ...selectedUser, is_active: false });
       }
-    } catch (err: any) {
-      setError(err.message || 'Error deactivating user');
+    } catch (err: unknown) { // Replace any with unknown
+      const errorMessage = err instanceof Error ? err.message : 'Error deactivating user';
+      setError(errorMessage);
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -205,13 +212,12 @@ export default function UsersPage() {
   };
 
   const filteredUsers = users.filter(user => {
-    const searchMatches = 
+    const searchMatches =
       user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (user.first_name && user.first_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (user.last_name && user.last_name.toLowerCase().includes(searchQuery.toLowerCase()));
-    
+
     const roleMatches = roleFilter === 'all' || user.role === roleFilter;
-    
     return searchMatches && roleMatches;
   });
 
@@ -226,7 +232,6 @@ export default function UsersPage() {
     return <div className="text-black">Loading...</div>;
   }
 
-  // Block non-admin users from accessing this page at the UI level
   if (!profile || profile.role !== 'admin') {
     return (
       <div className="p-4">
@@ -267,7 +272,7 @@ export default function UsersPage() {
             <div className="text-2xl font-bold text-black">{users.length}</div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-gray-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Students</CardTitle>
@@ -277,7 +282,7 @@ export default function UsersPage() {
             <div className="text-2xl font-bold text-black">{usersByRole.student}</div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-gray-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Vendors</CardTitle>
@@ -287,7 +292,7 @@ export default function UsersPage() {
             <div className="text-2xl font-bold text-black">{usersByRole.vendor}</div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-gray-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Pending Approval</CardTitle>
@@ -335,13 +340,14 @@ export default function UsersPage() {
                   <TableHead className="text-black">Role</TableHead>
                   <TableHead className="text-black">Status</TableHead>
                   <TableHead className="text-black">Joined</TableHead>
+                  <TableHead className="text-black">ID Verified</TableHead>
                   <TableHead className="text-right text-black">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-black">
+                    <TableCell colSpan={7} className="text-center py-8 text-black">
                       No users found
                     </TableCell>
                   </TableRow>
@@ -373,6 +379,13 @@ export default function UsersPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-black">{formatDate(user.created_at)}</TableCell>
+                      <TableCell>
+                        {user.is_id_verified ? (
+                          <Badge className="border-green-400 bg-green-50 text-green-700 border">Verified</Badge>
+                        ) : (
+                          <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border">Pending</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
@@ -410,7 +423,7 @@ export default function UsersPage() {
               {isEditing ? 'Update user information' : 'View user information and settings'}
             </DialogDescription>
           </DialogHeader>
-          
+
           {selectedUser && (
             <div className="space-y-4">
               {isEditing ? (
@@ -433,20 +446,20 @@ export default function UsersPage() {
                       />
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-black">Email</label>
-                    <Input 
-                      value={selectedUser.email} 
-                      disabled 
-                      className="bg-gray-50 text-black border-gray-300" 
+                    <Input
+                      value={selectedUser.email}
+                      disabled
+                      className="bg-gray-50 text-black border-gray-300"
                     />
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-black">Role</label>
-                      <Select value={editRole} onValueChange={(value) => setEditRole(value as any)}>
+                      <Select value={editRole} onValueChange={(value) => setEditRole(value as 'student' | 'vendor' | 'admin')}>
                         <SelectTrigger className="bg-white text-black border-gray-300">
                           <SelectValue />
                         </SelectTrigger>
@@ -457,9 +470,9 @@ export default function UsersPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    
+
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-black">Status</label>
+                      <label className="text-sm font-medium text-black">Vendor Approved</label>
                       <div className="flex items-center h-10 space-x-2">
                         <input
                           type="checkbox"
@@ -470,6 +483,21 @@ export default function UsersPage() {
                         />
                         <label htmlFor="isApproved" className="text-black">Approved</label>
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-black">ID Verified</label>
+                    <div className="flex items-center h-10 space-x-2">
+                      <input
+                        type="checkbox"
+                        id="isIdVerified"
+                        checked={editIsIdVerified}
+                        onChange={(e) => setEditIsIdVerified(e.target.checked)}
+                        disabled={!selectedUser.id_image_url}
+                        className="h-4 w-4 text-black border-gray-300"
+                      />
+                      <label htmlFor="isIdVerified" className="text-black">Verified</label>
                     </div>
                   </div>
                 </>
@@ -490,90 +518,65 @@ export default function UsersPage() {
                         </p>
                       </div>
                     </div>
-                    
+
                     <div>
                       <h3 className="text-sm font-medium text-black">Account Information</h3>
-                      <div className="mt-2 space-y-1">
-                        <p className="text-black">
-                          <span className="font-medium">Role:</span>{' '}
-                          <Badge className={
-                            selectedUser.role === 'admin'
-                              ? 'border-purple-400 bg-purple-50 text-purple-700 border'
-                              : selectedUser.role === 'vendor'
-                              ? 'border-green-400 bg-green-50 text-green-700 border'
-                              : 'border-blue-400 bg-blue-50 text-blue-700 border'
-                          }>
-                            {selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1)}
-                          </Badge>
-                        </p>
-                        <p className="text-black">
-                          <span className="font-medium">Status:</span>{' '}
-                          {selectedUser.role === 'vendor' && !selectedUser.is_approved ? (
-                            <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border">Pending Approval</Badge>
-                          ) : selectedUser.is_active === false ? (
-                            <Badge className="border-red-400 bg-red-50 text-red-700 border">Inactive</Badge>
-                          ) : (
-                            <Badge className="border-green-400 bg-green-50 text-green-700 border">Active</Badge>
-                          )}
-                        </p>
-                        <p className="text-black">
-                          <span className="font-medium">Joined:</span> {formatDate(selectedUser.created_at)}
-                        </p>
+                      <div className="text-black">
+                        <span className="font-medium">Role:</span>{' '}
+                        <Badge className={
+                          selectedUser.role === 'admin'
+                            ? 'border-purple-400 bg-purple-50 text-purple-700 border'
+                            : selectedUser.role === 'vendor'
+                            ? 'border-green-400 bg-green-50 text-green-700 border'
+                            : 'border-blue-400 bg-blue-50 text-blue-700 border'
+                        }>
+                          {selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1)}
+                        </Badge>
                       </div>
                     </div>
-                    
-                    {selectedUser.role === 'student' && (
+
+                    {selectedUser.id_image_url && (
                       <div>
-                        <h3 className="text-sm font-medium text-black">Student Information</h3>
-                        <div className="mt-2 space-y-1">
-                          <p className="text-black">
-                            <span className="font-medium">Student ID:</span> {selectedUser.student_id || 'Not provided'}
-                          </p>
-                          <p className="text-black">
-                            <span className="font-medium">Graduation Year:</span> {selectedUser.graduation_year || 'Not provided'}
-                          </p>
+                        <h3 className="text-sm font-medium text-black">ID Image</h3>
+                        <div className="mt-2 relative max-w-xs h-64">
+                          <Image
+                            src={selectedUser.id_image_url}
+                            alt="User ID Image"
+                            fill
+                            sizes="(max-width: 768px) 100vw, 300px"
+                            style={{ objectFit: 'contain' }}
+                            className="rounded-md"
+                          />
                         </div>
                       </div>
                     )}
-                    
-                    {selectedUser.role === 'vendor' && (
-                      <div>
-                        <h3 className="text-sm font-medium text-black">Vendor Information</h3>
-                        <div className="mt-2 space-y-1">
-                          <p className="text-black">
-                            <span className="font-medium">Business Name:</span> {selectedUser.business_name || 'Not provided'}
-                          </p>
-                          <p className="text-black">
-                            <span className="font-medium">Approval Status:</span>{' '}
-                            {selectedUser.is_approved ? (
-                              <span className="text-green-700 flex items-center">
-                                <CheckCircle className="h-4 w-4 mr-1" /> Approved
-                              </span>
-                            ) : (
-                              <span className="text-yellow-700 flex items-center">
-                                <XCircle className="h-4 w-4 mr-1" /> Pending
-                              </span>
-                            )}
-                          </p>
-                        </div>
+
+                    <div>
+                      <h3 className="text-sm font-medium text-black">Verification Status</h3>
+                      <div className="mt-2">
+                        {selectedUser.is_id_verified ? (
+                          <Badge className="border-green-400 bg-green-50 text-green-700 border">Verified</Badge>
+                        ) : (
+                          <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border">Pending</Badge>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
                 </>
               )}
-              
+
               <DialogFooter className="mt-6">
                 {isEditing ? (
                   <>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => setIsEditing(false)}
                       className="border-gray-300 text-black hover:bg-gray-100"
                     >
                       Cancel
                     </Button>
-                    <Button 
-                      onClick={handleSaveUser} 
+                    <Button
+                      onClick={handleSaveUser}
                       disabled={isSubmitting}
                       className="bg-gray-800 hover:bg-black text-white"
                     >
@@ -581,7 +584,7 @@ export default function UsersPage() {
                     </Button>
                   </>
                 ) : (
-                  <Button 
+                  <Button
                     onClick={handleEditUser}
                     className="bg-gray-800 hover:bg-black text-white"
                   >

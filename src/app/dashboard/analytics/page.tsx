@@ -24,6 +24,36 @@ import { formatPrice } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+// Define interfaces for our data structures
+interface Vendor {
+  id: string;
+  vendor_name: string;
+  profile_id: string;
+}
+
+interface SalesDataPoint {
+  date: string;
+  amount: number;
+}
+
+interface OrdersDataPoint {
+  date: string;
+  count: number;
+}
+
+interface ItemsDataPoint {
+  name: string;
+  value: number;
+}
+
+interface OrderRecord {
+  id: string;
+  total: number;
+  status: string;
+  created_at: string;
+  [key: string]: unknown; // For additional order properties
+}
+
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
 export default function AnalyticsPage() {
@@ -31,12 +61,14 @@ export default function AnalyticsPage() {
   const [timeRange, setTimeRange] = useState('week');
   const [activeTab, setActiveTab] = useState('sales');
   const [vendorFilter, setVendorFilter] = useState('all');
-  const [vendors, setVendors] = useState<any[]>([]);
-  const [salesData, setSalesData] = useState<any[]>([]);
-  const [ordersData, setOrdersData] = useState<any[]>([]);
-  const [itemsData, setItemsData] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [salesData, setSalesData] = useState<SalesDataPoint[]>([]);
+  const [ordersData, setOrdersData] = useState<OrdersDataPoint[]>([]);
+  const [itemsData, setItemsData] = useState<ItemsDataPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loadingData, setLoadingData] = useState(false);
 
+  // Fetch all vendors for admin filter
   useEffect(() => {
     const fetchVendors = async () => {
       try {
@@ -44,14 +76,15 @@ export default function AnalyticsPage() {
           const { data: vendorsData, error: vendorsError } = await supabase
             .from('food_vendors')
             .select('id, vendor_name, profile_id')
-            .eq('is_active', true);
+            .eq('is_active', true)
+            .order('vendor_name', { ascending: true });
 
           if (vendorsError) throw vendorsError;
           setVendors(vendorsData || []);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching vendors:', err);
-        setError(err.message);
+        setError(err instanceof Error ? err.message : 'An error occurred');
       }
     };
 
@@ -60,8 +93,12 @@ export default function AnalyticsPage() {
     }
   }, [profile]);
 
+  // Fetch analytics data based on filters
   useEffect(() => {
     const fetchAnalyticsData = async () => {
+      setLoadingData(true);
+      setError(null);
+      
       try {
         let vendorId = '';
         
@@ -86,7 +123,7 @@ export default function AnalyticsPage() {
 
         // Get the date range
         const now = new Date();
-        let startDate = new Date();
+        const startDate = new Date();
         
         switch (timeRange) {
           case 'week':
@@ -110,10 +147,14 @@ export default function AnalyticsPage() {
         // Fetch orders data
         let query = supabase
           .from('food_orders')
-          .select('*')
+          .select(`
+            *,
+            food_vendors(vendor_name)
+          `)
           .gte('created_at', startDateString)
           .order('created_at', { ascending: true });
         
+        // Only filter by vendor if not showing all vendors
         if (vendorId) {
           query = query.eq('vendor_id', vendorId);
         }
@@ -122,27 +163,45 @@ export default function AnalyticsPage() {
         
         if (ordersError) throw ordersError;
 
+        console.log(`Fetched ${orders?.length || 0} orders`);
+
         // Process data for analytics
         const processedData = processOrdersData(orders || [], timeRange);
         setSalesData(processedData.sales);
         setOrdersData(processedData.orders);
 
         // Fetch popular items
-        if (vendorId) {
+        // For "all vendors" view get the top items across all vendors
+        const orderIds = orders?.map(o => o.id) || [];
+        
+        if (orderIds.length > 0) {
           const { data: popularItems, error: itemsError } = await supabase
             .from('order_items')
             .select(`
-              menu_items (id, name),
-              quantity
+              quantity,
+              menu_items!inner (
+                id, 
+                name,
+                vendor_id
+              )
             `)
-            .in('order_id', orders?.map(o => o.id) || []);
+            .in('order_id', orderIds);
           
           if (itemsError) throw itemsError;
 
           // Aggregate items data
-          const itemsMap = new Map();
+          const itemsMap = new Map<string, number>();
+          
           popularItems?.forEach(item => {
-            const itemName = item.menu_items?.[0]?.name || 'Unknown Item';
+            if (!item.menu_items) return;
+            
+            const menuItem = Array.isArray(item.menu_items) 
+              ? item.menu_items[0] 
+              : item.menu_items;
+              
+            if (!menuItem) return;
+            
+            const itemName = menuItem.name || 'Unknown Item';
             const current = itemsMap.get(itemName) || 0;
             itemsMap.set(itemName, current + item.quantity);
           });
@@ -153,10 +212,14 @@ export default function AnalyticsPage() {
             .slice(0, 5);
           
           setItemsData(topItems);
+        } else {
+          setItemsData([]);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching analytics data:', err);
-        setError(err.message);
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        setLoadingData(false);
       }
     };
 
@@ -165,10 +228,10 @@ export default function AnalyticsPage() {
     }
   }, [profile, timeRange, vendorFilter]);
 
-  const processOrdersData = (orders: any[], range: string) => {
+  const processOrdersData = (orders: OrderRecord[], range: string) => {
     // Group the orders by date
-    const salesByDate = new Map();
-    const ordersByDate = new Map();
+    const salesByDate = new Map<string, number>();
+    const ordersByDate = new Map<string, number>();
     
     let dateFormat: 'day' | 'month' = 'day';
     if (range === 'quarter' || range === 'year') {
@@ -256,7 +319,9 @@ export default function AnalyticsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-black">Analytics Dashboard</h1>
         <p className="text-black">
-          View performance metrics and trends
+          {profile.role === 'admin' && vendorFilter === 'all' 
+            ? 'View aggregated performance metrics across all vendors' 
+            : 'View performance metrics and trends'}
         </p>
       </div>
 
@@ -279,6 +344,7 @@ export default function AnalyticsPage() {
               <SelectItem value="year">Last 12 months</SelectItem>
             </SelectContent>
           </Select>
+          
           {profile.role === 'admin' && (
             <Select value={vendorFilter} onValueChange={setVendorFilter}>
               <SelectTrigger className="w-[200px] border-gray-300 text-black">
@@ -297,170 +363,194 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Total Sales</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{formatPrice(totalSales)}</div>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Total Orders</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{totalOrders}</div>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Average Order Value</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{formatPrice(averageOrderValue)}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue={activeTab} onValueChange={setActiveTab} className="text-black">
-        <TabsList className="mb-4 bg-gray-100">
-          <TabsTrigger value="sales" className="data-[state=active]:bg-gray-800 data-[state=active]:text-white">Sales Trends</TabsTrigger>
-          <TabsTrigger value="orders" className="data-[state=active]:bg-gray-800 data-[state=active]:text-white">Order Volume</TabsTrigger>
-          {itemsData.length > 0 && <TabsTrigger value="items" className="data-[state=active]:bg-gray-800 data-[state=active]:text-white">Popular Items</TabsTrigger>}
-        </TabsList>
-        
-        <TabsContent value="sales">
-          <Card className="border-gray-300">
-            <CardHeader>
-              <CardTitle className="text-black">Sales Trend</CardTitle>
-              <CardDescription className="text-black">
-                {timeRange === 'week' && 'Daily sales for the past 7 days'}
-                {timeRange === 'month' && 'Daily sales for the past 30 days'}
-                {timeRange === 'quarter' && 'Monthly sales for the past 3 months'}
-                {timeRange === 'year' && 'Monthly sales for the past year'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={salesData}
-                    margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="date" 
-                      tickFormatter={formatDate}
-                      stroke="#000000"
-                    />
-                    <YAxis 
-                      tickFormatter={(value) => `$${value}`}
-                      stroke="#000000"
-                    />
-                    <Tooltip 
-                      formatter={(value) => [`$${value}`, 'Sales']}
-                      labelFormatter={formatDate}
-                    />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="amount"
-                      name="Sales"
-                      stroke="#000000"
-                      activeDot={{ r: 8 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="orders">
-          <Card className="border-gray-300">
-            <CardHeader>
-              <CardTitle className="text-black">Order Volume</CardTitle>
-              <CardDescription className="text-black">
-                {timeRange === 'week' && 'Daily order volume for the past 7 days'}
-                {timeRange === 'month' && 'Daily order volume for the past 30 days'}
-                {timeRange === 'quarter' && 'Monthly order volume for the past 3 months'}
-                {timeRange === 'year' && 'Monthly order volume for the past year'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={ordersData}
-                    margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="date" 
-                      tickFormatter={formatDate}
-                      stroke="#000000"
-                    />
-                    <YAxis stroke="#000000" />
-                    <Tooltip 
-                      formatter={(value) => [`${value}`, 'Orders']}
-                      labelFormatter={formatDate}
-                    />
-                    <Legend />
-                    <Bar
-                      dataKey="count"
-                      name="Orders"
-                      fill="#000000"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        {itemsData.length > 0 && (
-          <TabsContent value="items">
+      {loadingData ? (
+        <div className="flex justify-center items-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-4 md:grid-cols-3">
             <Card className="border-gray-300">
-              <CardHeader>
-                <CardTitle className="text-black">Popular Items</CardTitle>
-                <CardDescription className="text-black">
-                  Most ordered items for the selected period
-                </CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                <CardTitle className="text-sm font-medium text-black">Total Sales</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={itemsData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={100}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {itemsData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        formatter={(value) => [`${value} ordered`, 'Quantity']}
-                      />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
+                <div className="text-2xl font-bold text-black">{formatPrice(totalSales)}</div>
               </CardContent>
             </Card>
-          </TabsContent>
-        )}
-      </Tabs>
+            
+            <Card className="border-gray-300">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                <CardTitle className="text-sm font-medium text-black">Total Orders</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-black">{totalOrders}</div>
+              </CardContent>
+            </Card>
+            
+            <Card className="border-gray-300">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                <CardTitle className="text-sm font-medium text-black">Average Order Value</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-black">{formatPrice(averageOrderValue)}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Tabs defaultValue={activeTab} onValueChange={setActiveTab} className="text-black">
+            <TabsList className="mb-4 bg-gray-100">
+              <TabsTrigger value="sales" className="data-[state=active]:bg-gray-800 data-[state=active]:text-white">Sales Trends</TabsTrigger>
+              <TabsTrigger value="orders" className="data-[state=active]:bg-gray-800 data-[state=active]:text-white">Order Volume</TabsTrigger>
+              {itemsData.length > 0 && <TabsTrigger value="items" className="data-[state=active]:bg-gray-800 data-[state=active]:text-white">Popular Items</TabsTrigger>}
+            </TabsList>
+            
+            <TabsContent value="sales">
+              <Card className="border-gray-300">
+                <CardHeader>
+                  <CardTitle className="text-black">Sales Trend</CardTitle>
+                  <CardDescription className="text-black">
+                    {profile.role === 'admin' && vendorFilter === 'all' ? 'Aggregated sales across all vendors' : ''}
+                    {timeRange === 'week' && ' for the past 7 days'}
+                    {timeRange === 'month' && ' for the past 30 days'}
+                    {timeRange === 'quarter' && ' for the past 3 months'}
+                    {timeRange === 'year' && ' for the past year'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {salesData.length === 0 ? (
+                    <div className="h-80 flex items-center justify-center text-gray-500">
+                      No sales data available for the selected period
+                    </div>
+                  ) : (
+                    <div className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={salesData}
+                          margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="date" 
+                            tickFormatter={formatDate}
+                            stroke="#000000"
+                          />
+                          <YAxis 
+                            tickFormatter={(value) => `$${value}`}
+                            stroke="#000000"
+                          />
+                          <Tooltip 
+                            formatter={(value) => [`$${value}`, 'Sales']}
+                            labelFormatter={formatDate}
+                          />
+                          <Legend />
+                          <Line
+                            type="monotone"
+                            dataKey="amount"
+                            name="Sales"
+                            stroke="#000000"
+                            activeDot={{ r: 8 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+            
+            <TabsContent value="orders">
+              <Card className="border-gray-300">
+                <CardHeader>
+                  <CardTitle className="text-black">Order Volume</CardTitle>
+                  <CardDescription className="text-black">
+                    {profile.role === 'admin' && vendorFilter === 'all' ? 'Aggregated order volume across all vendors' : ''}
+                    {timeRange === 'week' && ' for the past 7 days'}
+                    {timeRange === 'month' && ' for the past 30 days'}
+                    {timeRange === 'quarter' && ' for the past 3 months'}
+                    {timeRange === 'year' && ' for the past year'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {ordersData.length === 0 ? (
+                    <div className="h-80 flex items-center justify-center text-gray-500">
+                      No order data available for the selected period
+                    </div>
+                  ) : (
+                    <div className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={ordersData}
+                          margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="date" 
+                            tickFormatter={formatDate}
+                            stroke="#000000"
+                          />
+                          <YAxis stroke="#000000" />
+                          <Tooltip 
+                            formatter={(value) => [`${value}`, 'Orders']}
+                            labelFormatter={formatDate}
+                          />
+                          <Legend />
+                          <Bar
+                            dataKey="count"
+                            name="Orders"
+                            fill="#000000"
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+            
+            {itemsData.length > 0 && (
+              <TabsContent value="items">
+                <Card className="border-gray-300">
+                  <CardHeader>
+                    <CardTitle className="text-black">Popular Items</CardTitle>
+                    <CardDescription className="text-black">
+                      {profile.role === 'admin' && vendorFilter === 'all' 
+                        ? 'Most ordered items across all vendors' 
+                        : 'Most ordered items'} for the selected period
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={itemsData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            outerRadius={100}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {itemsData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            formatter={(value) => [`${value} ordered`, 'Quantity']}
+                          />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
+          </Tabs>
+        </>
+      )}
     </div>
   );
 }
