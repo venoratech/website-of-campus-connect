@@ -30,6 +30,7 @@ import {
   MessageSquare,
   Bell,
   Clock,
+  Megaphone,
 } from 'lucide-react';
 
 interface SidebarItemProps {
@@ -112,6 +113,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       { icon: Building, title: 'Colleges', href: '/dashboard/colleges' },
       { icon: Store, title: 'Vendors', href: '/dashboard/vendors' },
       { icon: ShoppingBag, title: 'Marketplace', href: '/dashboard/marketplace' },
+      { icon: Megaphone, title: 'Announcements', href: '/dashboard/announcements' },
       { icon: BarChart, title: 'Analytics', href: '/dashboard/analytics' },
       { icon: Settings, title: 'Settings', href: '/dashboard/settings' },
     ];
