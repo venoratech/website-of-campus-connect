@@ -2,7 +2,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-// Remove unused router import
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, Profile } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,11 +27,10 @@ import { Input } from '@/components/ui/input';
 import { formatDate } from '@/lib/utils';
 import { Eye, Edit, User, UserX } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import Image from 'next/image'; // Import Next.js Image component
+import Image from 'next/image';
 
 export default function UsersPage() {
   const { profile, isLoading } = useAuth();
-  // Remove unused router
   const [users, setUsers] = useState<Profile[]>([]);
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -66,7 +64,7 @@ export default function UsersPage() {
 
         if (usersError) throw usersError;
         setUsers(data || []);
-      } catch (err: unknown) { // Replace any with unknown
+      } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : 'Error fetching users';
         setError(errorMessage);
         console.error(err);
@@ -153,7 +151,7 @@ export default function UsersPage() {
         is_id_verified: editIsIdVerified,
       });
       setIsEditing(false);
-    } catch (err: unknown) { // Replace any with unknown
+    } catch (err: unknown) {
       console.error('Full error object:', err);
       let errorMessage = 'Error updating user';
       
@@ -165,6 +163,55 @@ export default function UsersPage() {
       }
       
       setError(errorMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUpdateVerificationStatus = async (userId: string, isVerified: boolean) => {
+    if (profile?.role !== 'admin') return;
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      const response = await fetch('/api/update-user-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: userId,
+          isIdVerified: isVerified
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to update verification status');
+      }
+      
+      setSuccess('Verification status updated successfully');
+      
+      // Update local state
+      setUsers(users.map(u =>
+        u.id === userId ? {
+          ...u,
+          is_id_verified: isVerified,
+        } : u
+      ));
+
+      if (selectedUser && selectedUser.id === userId) {
+        setSelectedUser({
+          ...selectedUser,
+          is_id_verified: isVerified,
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error updating verification status';
+      setError(errorMessage);
+      console.error(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -202,7 +249,7 @@ export default function UsersPage() {
       if (selectedUser && selectedUser.id === userId) {
         setSelectedUser({ ...selectedUser, is_active: false });
       }
-    } catch (err: unknown) { // Replace any with unknown
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Error deactivating user';
       setError(errorMessage);
       console.error(err);
@@ -380,10 +427,30 @@ export default function UsersPage() {
                       </TableCell>
                       <TableCell className="text-black">{formatDate(user.created_at)}</TableCell>
                       <TableCell>
-                        {user.is_id_verified ? (
-                          <Badge className="border-green-400 bg-green-50 text-green-700 border">Verified</Badge>
+                        {user.role === 'vendor' ? (
+                          <Badge className="border-gray-400 bg-gray-50 text-gray-700 border">N/A</Badge>
+                        ) : user.id_image_url ? (
+                          <Select 
+                            value={user.is_id_verified ? "verified" : "not_verified"}
+                            onValueChange={(value) => {
+                              handleUpdateVerificationStatus(user.id, value === "verified");
+                            }}
+                            disabled={isSubmitting}
+                          >
+                            <SelectTrigger className={`w-[120px] rounded-full text-xs py-0.5 px-2.5 border ${
+                              user.is_id_verified 
+                                ? "border-green-400 bg-green-50 text-green-700" 
+                                : "border-yellow-400 bg-yellow-50 text-yellow-700"
+                            }`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white text-black">
+                              <SelectItem value="verified" className="text-green-700">Verified</SelectItem>
+                              <SelectItem value="not_verified" className="text-yellow-700">Not Verified</SelectItem>
+                            </SelectContent>
+                          </Select>
                         ) : (
-                          <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border">Pending</Badge>
+                          <Badge className="border-red-400 bg-red-50 text-red-700 border">ID Missing</Badge>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -486,20 +553,25 @@ export default function UsersPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-black">ID Verified</label>
-                    <div className="flex items-center h-10 space-x-2">
-                      <input
-                        type="checkbox"
-                        id="isIdVerified"
-                        checked={editIsIdVerified}
-                        onChange={(e) => setEditIsIdVerified(e.target.checked)}
-                        disabled={!selectedUser.id_image_url}
-                        className="h-4 w-4 text-black border-gray-300"
-                      />
-                      <label htmlFor="isIdVerified" className="text-black">Verified</label>
+                  {editRole !== 'vendor' && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-black">ID Verification Status</label>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="isIdVerified"
+                          checked={editIsIdVerified}
+                          onChange={(e) => setEditIsIdVerified(e.target.checked)}
+                          disabled={!selectedUser.id_image_url}
+                          className="h-4 w-4 text-black border-gray-300"
+                        />
+                        <label htmlFor="isIdVerified" className="text-black">Verified</label>
+                      </div>
+                      {!selectedUser.id_image_url && (
+                        <p className="text-sm text-gray-500 mt-1">ID image required for verification</p>
+                      )}
                     </div>
-                  </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -535,7 +607,7 @@ export default function UsersPage() {
                       </div>
                     </div>
 
-                    {selectedUser.id_image_url && (
+                    {selectedUser.role !== 'vendor' && selectedUser.id_image_url && (
                       <div>
                         <h3 className="text-sm font-medium text-black">ID Image</h3>
                         <div className="mt-2 relative max-w-xs h-64">
@@ -551,16 +623,36 @@ export default function UsersPage() {
                       </div>
                     )}
 
-                    <div>
-                      <h3 className="text-sm font-medium text-black">Verification Status</h3>
-                      <div className="mt-2">
-                        {selectedUser.is_id_verified ? (
-                          <Badge className="border-green-400 bg-green-50 text-green-700 border">Verified</Badge>
-                        ) : (
-                          <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border">Pending</Badge>
-                        )}
+                    {selectedUser.role !== 'vendor' && (
+                      <div>
+                        <h3 className="text-sm font-medium text-black">Verification Status</h3>
+                        <div className="mt-2">
+                          {selectedUser.id_image_url ? (
+                            <Select 
+                              value={selectedUser.is_id_verified ? "verified" : "not_verified"}
+                              onValueChange={(value) => {
+                                handleUpdateVerificationStatus(selectedUser.id, value === "verified");
+                              }}
+                              disabled={isSubmitting}
+                            >
+                              <SelectTrigger className={`w-[120px] rounded-full text-xs py-0.5 px-2.5 border ${
+                                selectedUser.is_id_verified 
+                                  ? "border-green-400 bg-green-50 text-green-700" 
+                                  : "border-yellow-400 bg-yellow-50 text-yellow-700"
+                              }`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white text-black">
+                                <SelectItem value="verified" className="text-green-700">Verified</SelectItem>
+                                <SelectItem value="not_verified" className="text-yellow-700">Not Verified</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge className="border-red-400 bg-red-50 text-red-700 border">ID Missing</Badge>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </>
               )}

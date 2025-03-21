@@ -49,7 +49,8 @@ type MediaItem = {
 export default function CreateAnnouncementPage() {
   const { profile, isLoading } = useAuth();
   const router = useRouter();
-
+  const [promoCode, setPromoCode] = useState("");
+  const [promoDescription, setPromoDescription] = useState("");
   const [colleges, setColleges] = useState<College[]>([]);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -129,23 +130,26 @@ export default function CreateAnnouncementPage() {
 
       // Call the function to create the announcement
       const { data: announcementResult, error: functionError } =
-        await supabase.rpc("create_multi_college_announcement", {
-          p_title: title,
-          p_content: content,
-          p_creator_id: profile.id,
-          p_college_ids: isGlobal ? [] : collegeIds,
-          p_is_global: isGlobal,
-          p_has_media: media.length > 0,
-          p_is_active: true,
-          p_is_pinned: isPinned,
-          p_scheduled_at: scheduledDate
-            ? new Date(scheduledDate).toISOString()
-            : null,
-          p_expires_at: expiresDate
-            ? new Date(expiresDate).toISOString()
-            : null,
-          p_target_audience: ["all"],
-        });
+      await supabase.rpc("create_multi_college_announcement", {
+        p_title: title,
+        p_content: content,
+        p_creator_id: profile.id,
+        p_college_ids: isGlobal ? [] : collegeIds,
+        p_is_global: isGlobal,
+        p_has_media: media.length > 0,
+        p_is_active: true,
+        p_is_pinned: isPinned,
+        p_scheduled_at: scheduledDate
+          ? new Date(scheduledDate).toISOString()
+          : null,
+        p_expires_at: expiresDate
+          ? new Date(expiresDate).toISOString()
+          : null,
+        p_target_audience: ["all"],
+        p_has_promo: promoCode.trim() !== "",
+        p_promo_code: promoCode.trim() || null,
+        p_promo_description: promoDescription.trim() || null
+      });
 
       if (functionError) {
         throw functionError;
@@ -571,6 +575,42 @@ export default function CreateAnnouncementPage() {
                   </Label>
                 </div>
               </div>
+
+              <div className="border p-4 rounded-md space-y-4">
+  <div className="flex items-center space-x-2">
+    <span className="h-5 w-5 flex items-center justify-center font-bold">%</span>
+    <h3 className="text-lg font-medium text-black">Promo Code</h3>
+  </div>
+  
+  <div className="space-y-4">
+    <div>
+      <Label htmlFor="promoCode" className="text-black">
+        Promo Code (Optional)
+      </Label>
+      <Input
+        id="promoCode"
+        value={promoCode}
+        onChange={(e) => setPromoCode(e.target.value)}
+        placeholder="Enter promo code"
+        className="text-black"
+      />
+    </div>
+    
+    <div>
+      <Label htmlFor="promoDescription" className="text-black">
+        Promo Description (Optional)
+      </Label>
+      <Textarea
+        id="promoDescription"
+        value={promoDescription}
+        onChange={(e) => setPromoDescription(e.target.value)}
+        placeholder="Describe what this promo code offers..."
+        rows={2}
+        className="text-black"
+      />
+    </div>
+  </div>
+</div>
 
               <div className="flex items-center space-x-2">
                 <Checkbox

@@ -52,6 +52,7 @@ import {
   Clock,
   AlertCircle,
   Trash2,
+  Tag,
 } from 'lucide-react';
 import { formatDate, formatTime } from '@/lib/utils';
 
@@ -70,6 +71,10 @@ interface Announcement {
   expires_at: string | null;
   target_audience: string[];
   is_global: boolean;
+  // Add promo code fields
+  has_promo?: boolean;
+  promo_code?: string;
+  promo_description?: string;
   // Optional nested objects from your query:
   creator?: {
     first_name: string | null;
@@ -303,6 +308,15 @@ export default function AnnouncementsPage() {
       badges.push(
         <Badge key="media" variant="outline" className="bg-blue-100 text-black border-blue-300">
           Media
+        </Badge>
+      );
+    }
+    // Add this badge for promo codes
+    if (announcement.has_promo) {
+      badges.push(
+        <Badge key="promo" variant="outline" className="bg-green-100 text-black border-green-300">
+          <Tag className="h-3 w-3 mr-1" />
+          Promo
         </Badge>
       );
     }
@@ -636,6 +650,15 @@ function AnnouncementModal({ announcement, onClose, onToggleActive, onDelete }: 
         );
       }
     }
+    // Add promo badge
+    if (announcement.has_promo) {
+      badges.push(
+        <Badge key="promo" variant="outline" className="bg-green-100 text-black border-green-300">
+          <Tag className="h-3 w-3 mr-1" />
+          Promo
+        </Badge>
+      );
+    }
     return badges;
   };
 
@@ -665,6 +688,25 @@ function AnnouncementModal({ announcement, onClose, onToggleActive, onDelete }: 
             <div className="p-4 bg-gray-50 rounded-md whitespace-pre-wrap text-black">
               {announcement.content}
             </div>
+            
+            {/* Promo code section */}
+            {announcement.has_promo && (
+              <div>
+                <h3 className="text-lg font-medium mb-2 text-black">Promo Code</h3>
+                <div className="p-4 bg-gray-50 rounded-md">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-black">{announcement.promo_code}</span>
+                    <Badge className="bg-green-100 text-green-800 border-green-300">
+                      Promo Code
+                    </Badge>
+                  </div>
+                  {announcement.promo_description && (
+                    <p className="text-black">{announcement.promo_description}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div>
               <h3 className="text-lg font-medium mb-2 text-black">Media</h3>
               {renderMediaItems()}
