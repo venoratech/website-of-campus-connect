@@ -67,3 +67,11 @@ export function snakeToTitleCase(str: string): string {
     .map(word => capitalizeFirstLetter(word))
     .join(' ')
 }
+
+export function formatPercent(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'percent',
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(value);
+}

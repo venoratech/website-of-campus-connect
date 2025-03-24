@@ -1,10 +1,10 @@
-// app/dashboard/layout.tsx
+// app/dashboard/layout.tsx - Updated MobileSidebar component
 'use client';
 import { ReactNode, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -31,6 +31,7 @@ import {
   Bell,
   Clock,
   Megaphone,
+  FileText,
 } from 'lucide-react';
 
 interface SidebarItemProps {
@@ -64,6 +65,10 @@ const MobileSidebar = ({ children }: MobileSidebarProps) => (
       </Button>
     </SheetTrigger>
     <SheetContent side="left" className="w-64 bg-white text-black border-gray-300">
+      {/* Add SheetHeader and SheetTitle to fix accessibility error */}
+      <SheetHeader>
+        <SheetTitle className="text-black">Navigation Menu</SheetTitle>
+      </SheetHeader>
       <div className="flex flex-col h-full">
         <div className="py-4">
           <h2 className="text-lg font-semibold px-3 text-black">College Marketplace</h2>
@@ -114,6 +119,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       { icon: Store, title: 'Vendors', href: '/dashboard/vendors' },
       { icon: ShoppingBag, title: 'Marketplace', href: '/dashboard/marketplace' },
       { icon: Megaphone, title: 'Announcements', href: '/dashboard/announcements' },
+      { icon: FileText, title: 'Terms & Conditions', href: '/dashboard/terms' }, // Add this line
       { icon: BarChart, title: 'Analytics', href: '/dashboard/analytics' },
       { icon: Settings, title: 'Settings', href: '/dashboard/settings' },
     ];

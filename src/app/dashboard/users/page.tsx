@@ -1,4 +1,4 @@
-// app/dashboard/users/page.tsx
+// app/dashboard/users/page.tsx - Mobile-friendly version
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -276,7 +276,7 @@ export default function UsersPage() {
   };
 
   if (isLoading) {
-    return <div className="text-black">Loading...</div>;
+    return <div className="text-black p-4">Loading...</div>;
   }
 
   if (!profile || profile.role !== 'admin') {
@@ -289,74 +289,76 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-2 sm:px-4 pb-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-black">User Management</h1>
-        <p className="text-black">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-black mt-4">User Management</h1>
+        <p className="text-black text-sm sm:text-base">
           Manage users, roles, and permissions
         </p>
       </div>
 
       {error && (
-        <div className="bg-red-50 p-4 rounded-md border border-red-300">
-          <p className="text-red-800 font-medium">{error}</p>
+        <div className="bg-red-50 p-3 rounded-md border border-red-300">
+          <p className="text-red-800 font-medium text-sm">{error}</p>
         </div>
       )}
 
       {success && (
-        <div className="bg-green-50 p-4 rounded-md border border-green-300">
-          <p className="text-green-800 font-medium">{success}</p>
+        <div className="bg-green-50 p-3 rounded-md border border-green-300">
+          <p className="text-green-800 font-medium text-sm">{success}</p>
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* Stats Cards - Responsive grid */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Total Users</CardTitle>
-            <User className="h-4 w-4 text-black" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Total Users</CardTitle>
+            <User className="h-3 w-3 sm:h-4 sm:w-4 text-black" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{users.length}</div>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{users.length}</div>
           </CardContent>
         </Card>
 
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Students</CardTitle>
-            <User className="h-4 w-4 text-blue-700" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Students</CardTitle>
+            <User className="h-3 w-3 sm:h-4 sm:w-4 text-blue-700" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{usersByRole.student}</div>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{usersByRole.student}</div>
           </CardContent>
         </Card>
 
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Vendors</CardTitle>
-            <User className="h-4 w-4 text-green-700" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Vendors</CardTitle>
+            <User className="h-3 w-3 sm:h-4 sm:w-4 text-green-700" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{usersByRole.vendor}</div>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{usersByRole.vendor}</div>
           </CardContent>
         </Card>
 
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Pending Approval</CardTitle>
-            <User className="h-4 w-4 text-yellow-700" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Pending</CardTitle>
+            <User className="h-3 w-3 sm:h-4 sm:w-4 text-yellow-700" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{usersByRole.pendingVendors}</div>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{usersByRole.pendingVendors}</div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3 sm:space-y-4">
+        {/* Filter & Search - Stack vertically on mobile */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center space-x-2">
-            <h2 className="text-xl font-semibold text-black">Users</h2>
+            <h2 className="text-lg sm:text-xl font-semibold text-black">Users</h2>
             <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-[150px] bg-white text-black border-gray-300">
+              <SelectTrigger className="w-[140px] h-9 bg-white text-black border-gray-300 text-sm">
                 <SelectValue placeholder="Role" />
               </SelectTrigger>
               <SelectContent className="bg-white text-black">
@@ -367,98 +369,39 @@ export default function UsersPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="w-1/3">
-            <Input
-              placeholder="Search users..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-white text-black border-gray-300"
-            />
-          </div>
+          
+          <Input
+            placeholder="Search users..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-white text-black border-gray-300 h-9 text-sm"
+          />
         </div>
 
-        <Card className="border-gray-300">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader className="bg-gray-50">
-                <TableRow>
-                  <TableHead className="text-black">Name</TableHead>
-                  <TableHead className="text-black">Email</TableHead>
-                  <TableHead className="text-black">Role</TableHead>
-                  <TableHead className="text-black">Status</TableHead>
-                  <TableHead className="text-black">Joined</TableHead>
-                  <TableHead className="text-black">ID Verified</TableHead>
-                  <TableHead className="text-right text-black">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredUsers.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-black">
-                      No users found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredUsers.map((user) => (
-                    <TableRow key={user.id} className="border-gray-200">
-                      <TableCell className="font-medium text-black">
-                        {user.first_name} {user.last_name || ''}
-                      </TableCell>
-                      <TableCell className="text-black">{user.email}</TableCell>
-                      <TableCell>
-                        <Badge className={
-                          user.role === 'admin'
-                            ? 'border-purple-400 bg-purple-50 text-purple-700 border'
-                            : user.role === 'vendor'
-                            ? 'border-green-400 bg-green-50 text-green-700 border'
-                            : 'border-blue-400 bg-blue-50 text-blue-700 border'
-                        }>
-                          {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {user.role === 'vendor' && !user.is_approved ? (
-                          <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border">Pending Approval</Badge>
-                        ) : user.is_active === false ? (
-                          <Badge className="border-red-400 bg-red-50 text-red-700 border">Inactive</Badge>
-                        ) : (
-                          <Badge className="border-green-400 bg-green-50 text-green-700 border">Active</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-black">{formatDate(user.created_at)}</TableCell>
-                      <TableCell>
-                        {user.role === 'vendor' ? (
-                          <Badge className="border-gray-400 bg-gray-50 text-gray-700 border">N/A</Badge>
-                        ) : user.id_image_url ? (
-                          <Select 
-                            value={user.is_id_verified ? "verified" : "not_verified"}
-                            onValueChange={(value) => {
-                              handleUpdateVerificationStatus(user.id, value === "verified");
-                            }}
-                            disabled={isSubmitting}
-                          >
-                            <SelectTrigger className={`w-[120px] rounded-full text-xs py-0.5 px-2.5 border ${
-                              user.is_id_verified 
-                                ? "border-green-400 bg-green-50 text-green-700" 
-                                : "border-yellow-400 bg-yellow-50 text-yellow-700"
-                            }`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white text-black">
-                              <SelectItem value="verified" className="text-green-700">Verified</SelectItem>
-                              <SelectItem value="not_verified" className="text-yellow-700">Not Verified</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <Badge className="border-red-400 bg-red-50 text-red-700 border">ID Missing</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
+        {/* Mobile User Cards View */}
+        <div className="sm:hidden">
+          {filteredUsers.length === 0 ? (
+            <div className="text-center py-8 text-black">
+              No users found
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredUsers.map((user) => (
+                <Card key={user.id} className="border-gray-300">
+                  <CardContent className="p-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-medium text-black">
+                          {user.first_name} {user.last_name || ''}
+                        </h3>
+                        <p className="text-sm text-black">{user.email}</p>
+                      </div>
+                      <div className="flex gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => handleViewUser(user)}
-                          className="text-black hover:bg-gray-100"
+                          className="h-8 w-8 text-black hover:bg-gray-100"
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -467,23 +410,191 @@ export default function UsersPage() {
                           size="icon"
                           onClick={() => handleDeactivateUser(user.id)}
                           disabled={user.is_active === false}
-                          className="text-black hover:bg-gray-100"
+                          className="h-8 w-8 text-black hover:bg-gray-100"
                         >
                           <UserX className="h-4 w-4" />
                         </Button>
-                      </TableCell>
+                      </div>
+                    </div>
+                    
+                    <div className="mt-2 space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-black">Role:</span>
+                        <Badge className={
+                          user.role === 'admin'
+                            ? 'border-purple-400 bg-purple-50 text-purple-700 border text-xs'
+                            : user.role === 'vendor'
+                            ? 'border-green-400 bg-green-50 text-green-700 border text-xs'
+                            : 'border-blue-400 bg-blue-50 text-blue-700 border text-xs'
+                        }>
+                          {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-black">Status:</span>
+                        {user.role === 'vendor' && !user.is_approved ? (
+                          <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border text-xs">Pending Approval</Badge>
+                        ) : user.is_active === false ? (
+                          <Badge className="border-red-400 bg-red-50 text-red-700 border text-xs">Inactive</Badge>
+                        ) : (
+                          <Badge className="border-green-400 bg-green-50 text-green-700 border text-xs">Active</Badge>
+                        )}
+                      </div>
+                      
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-black">Joined:</span>
+                        <span className="text-xs text-black">{formatDate(user.created_at)}</span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-black">ID Verified:</span>
+                        {user.role === 'vendor' ? (
+                          <Badge className="border-gray-400 bg-gray-50 text-gray-700 border text-xs">N/A</Badge>
+                        ) : user.id_image_url ? (
+                          <Select 
+                            value={user.is_id_verified ? "verified" : "not_verified"}
+                            onValueChange={(value) => {
+                              handleUpdateVerificationStatus(user.id, value === "verified");
+                            }}
+                            disabled={isSubmitting}
+                          >
+                            <SelectTrigger className={`w-[110px] h-7 rounded-full text-xs py-0 px-2 border ${
+                              user.is_id_verified 
+                                ? "border-green-400 bg-green-50 text-green-700" 
+                                : "border-yellow-400 bg-yellow-50 text-yellow-700"
+                            }`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white text-black">
+                              <SelectItem value="verified" className="text-green-700 text-xs">Verified</SelectItem>
+                              <SelectItem value="not_verified" className="text-yellow-700 text-xs">Not Verified</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge className="border-red-400 bg-red-50 text-red-700 border text-xs">ID Missing</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden sm:block">
+          <Card className="border-gray-300">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead className="text-black">Name</TableHead>
+                      <TableHead className="text-black">Email</TableHead>
+                      <TableHead className="text-black">Role</TableHead>
+                      <TableHead className="text-black">Status</TableHead>
+                      <TableHead className="text-black">Joined</TableHead>
+                      <TableHead className="text-black">ID Verified</TableHead>
+                      <TableHead className="text-right text-black">Actions</TableHead>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-8 text-black">
+                          No users found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredUsers.map((user) => (
+                        <TableRow key={user.id} className="border-gray-200">
+                          <TableCell className="font-medium text-black">
+                            {user.first_name} {user.last_name || ''}
+                          </TableCell>
+                          <TableCell className="text-black">{user.email}</TableCell>
+                          <TableCell>
+                            <Badge className={
+                              user.role === 'admin'
+                                ? 'border-purple-400 bg-purple-50 text-purple-700 border'
+                                : user.role === 'vendor'
+                                ? 'border-green-400 bg-green-50 text-green-700 border'
+                                : 'border-blue-400 bg-blue-50 text-blue-700 border'
+                            }>
+                              {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {user.role === 'vendor' && !user.is_approved ? (
+                              <Badge className="border-yellow-400 bg-yellow-50 text-yellow-700 border">Pending Approval</Badge>
+                            ) : user.is_active === false ? (
+                              <Badge className="border-red-400 bg-red-50 text-red-700 border">Inactive</Badge>
+                            ) : (
+                              <Badge className="border-green-400 bg-green-50 text-green-700 border">Active</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-black">{formatDate(user.created_at)}</TableCell>
+                          <TableCell>
+                            {user.role === 'vendor' ? (
+                              <Badge className="border-gray-400 bg-gray-50 text-gray-700 border">N/A</Badge>
+                            ) : user.id_image_url ? (
+                              <Select 
+                                value={user.is_id_verified ? "verified" : "not_verified"}
+                                onValueChange={(value) => {
+                                  handleUpdateVerificationStatus(user.id, value === "verified");
+                                }}
+                                disabled={isSubmitting}
+                              >
+                                <SelectTrigger className={`w-[120px] rounded-full text-xs py-0.5 px-2.5 border ${
+                                  user.is_id_verified 
+                                    ? "border-green-400 bg-green-50 text-green-700" 
+                                    : "border-yellow-400 bg-yellow-50 text-yellow-700"
+                                }`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-white text-black">
+                                  <SelectItem value="verified" className="text-green-700">Verified</SelectItem>
+                                  <SelectItem value="not_verified" className="text-yellow-700">Not Verified</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Badge className="border-red-400 bg-red-50 text-red-700 border">ID Missing</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleViewUser(user)}
+                              className="text-black hover:bg-gray-100"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeactivateUser(user.id)}
+                              disabled={user.is_active === false}
+                              className="text-black hover:bg-gray-100"
+                            >
+                              <UserX className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* User Details Dialog */}
       <Dialog open={viewUserOpen} onOpenChange={setViewUserOpen}>
-        <DialogContent className="sm:max-w-md bg-white text-black border-gray-300">
+        <DialogContent className="sm:max-w-md max-w-[90%] bg-white text-black border-gray-300">
           <DialogHeader>
             <DialogTitle className="text-black">{isEditing ? 'Edit User' : 'User Details'}</DialogTitle>
             <DialogDescription className="text-black">
@@ -495,7 +606,7 @@ export default function UsersPage() {
             <div className="space-y-4">
               {isEditing ? (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-black">First Name</label>
                       <Input
@@ -523,7 +634,7 @@ export default function UsersPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-black">Role</label>
                       <Select value={editRole} onValueChange={(value) => setEditRole(value as 'student' | 'vendor' | 'admin')}>
@@ -579,7 +690,7 @@ export default function UsersPage() {
                     <div>
                       <h3 className="text-sm font-medium text-black">Personal Information</h3>
                       <div className="mt-2 space-y-1">
-                        <p className="text-black">
+                      <p className="text-black">
                           <span className="font-medium">Name:</span> {selectedUser.first_name} {selectedUser.last_name || ''}
                         </p>
                         <p className="text-black">
@@ -610,7 +721,7 @@ export default function UsersPage() {
                     {selectedUser.role !== 'vendor' && selectedUser.id_image_url && (
                       <div>
                         <h3 className="text-sm font-medium text-black">ID Image</h3>
-                        <div className="mt-2 relative max-w-xs h-64">
+                        <div className="mt-2 relative h-48 sm:h-64 w-full">
                           <Image
                             src={selectedUser.id_image_url}
                             alt="User ID Image"
@@ -657,20 +768,20 @@ export default function UsersPage() {
                 </>
               )}
 
-              <DialogFooter className="mt-6">
+              <DialogFooter className="mt-6 flex flex-col-reverse sm:flex-row gap-2">
                 {isEditing ? (
                   <>
                     <Button
                       variant="outline"
                       onClick={() => setIsEditing(false)}
-                      className="border-gray-300 text-black hover:bg-gray-100"
+                      className="border-gray-300 text-black hover:bg-gray-100 w-full sm:w-auto"
                     >
                       Cancel
                     </Button>
                     <Button
                       onClick={handleSaveUser}
                       disabled={isSubmitting}
-                      className="bg-gray-800 hover:bg-black text-white"
+                      className="bg-black hover:bg-gray-800 text-white w-full sm:w-auto"
                     >
                       {isSubmitting ? 'Saving...' : 'Save Changes'}
                     </Button>
@@ -678,7 +789,7 @@ export default function UsersPage() {
                 ) : (
                   <Button
                     onClick={handleEditUser}
-                    className="bg-gray-800 hover:bg-black text-white"
+                    className="bg-black hover:bg-gray-800 text-white w-full sm:w-auto"
                   >
                     <Edit className="h-4 w-4 mr-2" />
                     Edit User

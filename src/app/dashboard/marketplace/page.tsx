@@ -269,7 +269,7 @@ export default function MarketplacePage() {
   };
 
   if (isLoading) {
-    return <div>Loading...</div>;
+    return <div className="p-4 text-black">Loading...</div>;
   }
 
   if (profile?.role !== 'admin') {
@@ -282,34 +282,35 @@ export default function MarketplacePage() {
   }
 
   return (
-    <div className="space-y-6 text-black">
+    <div className="space-y-4 sm:space-y-6 px-2 sm:px-4 pb-6 text-black">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-black">Marketplace Management</h1>
-        <p className="text-black">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-black mt-4">Marketplace Management</h1>
+        <p className="text-black text-sm sm:text-base">
           Manage listings and transactions in the student marketplace
         </p>
       </div>
 
       {error && (
-        <div className="bg-red-50 p-4 rounded-md border border-red-300">
-          <p className="text-red-800 font-medium">{error}</p>
+        <div className="bg-red-50 p-3 rounded-md border border-red-300">
+          <p className="text-red-800 font-medium text-sm">{error}</p>
         </div>
       )}
 
       {success && (
-        <div className="bg-green-50 p-4 rounded-md border border-green-300">
-          <p className="text-green-800 font-medium">{success}</p>
+        <div className="bg-green-50 p-3 rounded-md border border-green-300">
+          <p className="text-green-800 font-medium text-sm">{success}</p>
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* Stats Cards - Responsive grid */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Total Listings</CardTitle>
-            <ShoppingBag className="h-4 w-4 text-black" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Total Listings</CardTitle>
+            <ShoppingBag className="h-3 w-3 sm:h-4 sm:w-4 text-black" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{itemStats.total}</div>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{itemStats.total}</div>
             <p className="text-xs text-black">
               {itemStats.active} active, {itemStats.sold} sold
             </p>
@@ -317,12 +318,12 @@ export default function MarketplacePage() {
         </Card>
         
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Total Transactions</CardTitle>
-            <BarChart4 className="h-4 w-4 text-black" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Transactions</CardTitle>
+            <BarChart4 className="h-3 w-3 sm:h-4 sm:w-4 text-black" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{transactionStats.total}</div>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{transactionStats.total}</div>
             <p className="text-xs text-black">
               {transactionStats.completed} completed
             </p>
@@ -330,48 +331,43 @@ export default function MarketplacePage() {
         </Card>
         
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Transaction Value</CardTitle>
-            <DollarSign className="h-4 w-4 text-black" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Value</CardTitle>
+            <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 text-black" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{formatPrice(transactionStats.totalValue)}</div>
-            <p className="text-xs text-black">
-              From completed transactions
-            </p>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{formatPrice(transactionStats.totalValue)}</div>
+            <p className="text-xs text-black">Completed transactions</p>
           </CardContent>
         </Card>
         
         <Card className="border-gray-300">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Categories</CardTitle>
-            <BarChart4 className="h-4 w-4 text-black" />
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3 sm:pb-2 sm:pt-4 sm:px-4 space-y-0">
+            <CardTitle className="text-xs sm:text-sm font-medium text-black">Categories</CardTitle>
+            <BarChart4 className="h-3 w-3 sm:h-4 sm:w-4 text-black" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-black">{categories.length}</div>
-            <p className="text-xs text-black">
-              Available for listings
-            </p>
+          <CardContent className="pt-0 pb-3 px-3 sm:pb-4 sm:px-4">
+            <div className="text-lg sm:text-2xl font-bold text-black">{categories.length}</div>
+            <p className="text-xs text-black">Available for listings</p>
           </CardContent>
         </Card>
       </div>
 
-
-      <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="items" className="text-black">Marketplace Items</TabsTrigger>
-          <TabsTrigger value="transactions" className="text-black">Transactions</TabsTrigger>
+      <Tabs defaultValue={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="w-full mb-3">
+          <TabsTrigger value="items" className="text-black flex-1">Marketplace Items</TabsTrigger>
+          <TabsTrigger value="transactions" className="text-black flex-1">Transactions</TabsTrigger>
         </TabsList>
         
         {/* Items Tab */}
-        <TabsContent value="items" className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-2 md:space-y-0">
-            <div className="flex items-center space-x-2">
+        <TabsContent value="items" className="space-y-3 sm:space-y-4">
+          <div className="flex flex-col space-y-2 sm:space-y-0 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap gap-2">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-full sm:w-[150px] h-9 text-sm">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="text-black">
                   <SelectItem value="all">All Statuses</SelectItem>
                   <SelectItem value="active">Active</SelectItem>
                   <SelectItem value="sold">Sold</SelectItem>
@@ -381,10 +377,10 @@ export default function MarketplacePage() {
               </Select>
               
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full sm:w-[180px] h-9 text-sm">
                   <SelectValue placeholder="Category" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="text-black">
                   <SelectItem value="all">All Categories</SelectItem>
                   {categories.map(category => (
                     <SelectItem key={category.id} value={category.id}>
@@ -399,104 +395,171 @@ export default function MarketplacePage() {
               placeholder="Search items..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="md:w-1/3"
+              className="w-full sm:w-1/3 h-9 text-sm"
             />
           </div>
 
-          <Card className="border-0 shadow-md">
-          <CardContent className="p-0">
-              <Table className="border-collapse">
-                <TableHeader>
-                  <TableRow className="border-0">
-                    <TableHead className="border-b">Item</TableHead>
-                    <TableHead className="border-b">Seller</TableHead>
-                    <TableHead className="border-b">Price</TableHead>
-                    <TableHead className="border-b">Category</TableHead>
-                    <TableHead className="border-b">Date</TableHead>
-                    <TableHead className="border-b">Status</TableHead>
-                    <TableHead className="border-b text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredItems.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8">
-                        No items found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredItems.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <div className="flex items-center space-x-2">
-                            {getPrimaryImage(item) && (
-                              <div className="relative h-10 w-10">
-                                <Image 
-                                  src={getPrimaryImage(item)!} 
-                                  alt={item.title} 
-                                  width={40}
-                                  height={40}
-                                  className="rounded object-cover"
-                                />
-                              </div>
-                            )}
-                            <span className="font-medium">{item.title}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {item.seller ? (
-                            <div>
-                              <p>
-                                {item.seller.first_name} {item.seller.last_name}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {item.seller.email}
-                              </p>
-                            </div>
-                          ) : (
-                            'Unknown Seller'
-                          )}
-                        </TableCell>
-                        <TableCell>{formatPrice(item.price)}</TableCell>
-                        <TableCell>{item.category?.name || 'Uncategorized'}</TableCell>
-                        <TableCell>{formatDate(item.created_at)}</TableCell>
-                        <TableCell>{getStatusBadge(item.status)}</TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleViewItem(item)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {item.status === 'active' && (
+          {/* Mobile Item Cards View */}
+          <div className="sm:hidden space-y-3">
+            {filteredItems.length === 0 ? (
+              <div className="text-center py-8 text-black">
+                No items found
+              </div>
+            ) : (
+              filteredItems.map((item) => (
+                <Card key={item.id} className="border-gray-300">
+                  <CardContent className="p-3">
+                    <div className="flex gap-3">
+                      {getPrimaryImage(item) && (
+                        <div className="relative h-16 w-16 flex-shrink-0">
+                          <Image 
+                            src={getPrimaryImage(item)!} 
+                            alt={item.title} 
+                            fill
+                            className="rounded object-cover"
+                          />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-black truncate">{item.title}</h3>
+                        <p className="text-sm text-black">{formatPrice(item.price)}</p>
+                        <div className="flex items-center justify-between mt-2">
+                          <div>{getStatusBadge(item.status)}</div>
+                          <div className="flex gap-1">
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleRemoveItem(item.id)}
-                              disabled={isSubmitting}
+                              onClick={() => handleViewItem(item)}
+                              className="h-8 w-8"
                             >
-                              <XCircle className="h-4 w-4 text-red-500" />
+                              <Eye className="h-4 w-4" />
                             </Button>
-                          )}
-                        </TableCell>
+                            {item.status === 'active' && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRemoveItem(item.id)}
+                                disabled={isSubmitting}
+                                className="h-8 w-8"
+                              >
+                                <XCircle className="h-4 w-4 text-red-500" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-200">
+                      <div className="flex justify-between text-xs">
+                        <span>Seller: {item.seller ? `${item.seller.first_name} ${item.seller.last_name}` : 'Unknown'}</span>
+                        <span>{formatDate(item.created_at)}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden sm:block">
+            <Card className="border-0 shadow-md">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table className="border-collapse">
+                    <TableHeader>
+                      <TableRow className="border-0">
+                        <TableHead className="border-b text-black">Item</TableHead>
+                        <TableHead className="border-b text-black">Seller</TableHead>
+                        <TableHead className="border-b text-black">Price</TableHead>
+                        <TableHead className="border-b text-black">Category</TableHead>
+                        <TableHead className="border-b text-black">Date</TableHead>
+                        <TableHead className="border-b text-black">Status</TableHead>
+                        <TableHead className="border-b text-right text-black">Actions</TableHead>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredItems.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8 text-black">
+                            No items found
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredItems.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="text-black">
+                              <div className="flex items-center space-x-2">
+                                {getPrimaryImage(item) && (
+                                  <div className="relative h-10 w-10">
+                                    <Image 
+                                      src={getPrimaryImage(item)!} 
+                                      alt={item.title} 
+                                      width={40}
+                                      height={40}
+                                      className="rounded object-cover"
+                                    />
+                                  </div>
+                                )}
+                                <span className="font-medium">{item.title}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-black">
+                              {item.seller ? (
+                                <div>
+                                  <p>
+                                    {item.seller.first_name} {item.seller.last_name}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    {item.seller.email}
+                                  </p>
+                                </div>
+                              ) : (
+                                'Unknown Seller'
+                              )}
+                            </TableCell>
+                            <TableCell className="text-black">{formatPrice(item.price)}</TableCell>
+                            <TableCell className="text-black">{item.category?.name || 'Uncategorized'}</TableCell>
+                            <TableCell className="text-black">{formatDate(item.created_at)}</TableCell>
+                            <TableCell>{getStatusBadge(item.status)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleViewItem(item)}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              {item.status === 'active' && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleRemoveItem(item.id)}
+                                  disabled={isSubmitting}
+                                >
+                                  <XCircle className="h-4 w-4 text-red-500" />
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
         
         {/* Transactions Tab */}
-        <TabsContent value="transactions" className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-2 md:space-y-0">
+        <TabsContent value="transactions" className="space-y-3 sm:space-y-4">
+          <div className="flex flex-col space-y-2 sm:space-y-0 sm:flex-row sm:items-center sm:justify-between">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-full sm:w-[150px] h-9 text-sm">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="text-black">
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="requested">Requested</SelectItem>
                 <SelectItem value="accepted">Accepted</SelectItem>
@@ -509,105 +572,156 @@ export default function MarketplacePage() {
               placeholder="Search transactions..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="md:w-1/3"
+              className="w-full sm:w-1/3 h-9 text-sm"
             />
           </div>
 
+          {/* Mobile Transaction Cards View */}
+          <div className="sm:hidden space-y-3">
+            {filteredTransactions.length === 0 ? (
+              <div className="text-center py-8 text-black">
+                No transactions found
+              </div>
+            ) : (
+              filteredTransactions.map((transaction) => (
+                <Card key={transaction.id} className="border-gray-300">
+                  <CardContent className="p-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-medium text-black">{transaction.item?.title || 'Unknown Item'}</h3>
+                        <p className="text-sm font-bold text-black">{formatPrice(transaction.amount)}</p>
+                      </div>
+                      <div>
+                        {getTransactionStatusBadge(transaction.status)}
+                      </div>
+                    </div>
+                    
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500">Buyer:</span><br />
+                        {transaction.buyer ? `${transaction.buyer.first_name} ${transaction.buyer.last_name}` : 'Unknown'}
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Seller:</span><br />
+                        {transaction.seller ? `${transaction.seller.first_name} ${transaction.seller.last_name}` : 'Unknown'}
+                      </div>
+                    </div>
+                    
+                    <div className="mt-2 flex justify-between items-center border-t border-gray-200 pt-2">
+                      <span className="text-xs text-black">{formatDate(transaction.created_at)}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleViewTransaction(transaction)}
+                        className="h-8 w-8"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
 
-          <Card className="border-0 shadow-md">
-          <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead>Buyer</TableHead>
-                    <TableHead>Seller</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredTransactions.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8">
-                        No transactions found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredTransactions.map((transaction) => (
-                      <TableRow key={transaction.id}>
-                        <TableCell className="font-medium">
-                          {transaction.item?.title || 'Unknown Item'}
-                        </TableCell>
-                        <TableCell>
-                          {transaction.buyer ? (
-                            <div>
-                              <p>{transaction.buyer.first_name} {transaction.buyer.last_name}</p>
-                              <p className="text-xs text-gray-500">{transaction.buyer.email}</p>
-                            </div>
-                          ) : (
-                            'Unknown Buyer'
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {transaction.seller ? (
-                            <div>
-                              <p>{transaction.seller.first_name} {transaction.seller.last_name}</p>
-                              <p className="text-xs text-gray-500">{transaction.seller.email}</p>
-                            </div>
-                          ) : (
-                            'Unknown Seller'
-                          )}
-                        </TableCell>
-                        <TableCell>{formatPrice(transaction.amount)}</TableCell>
-                        <TableCell>{formatDate(transaction.created_at)}</TableCell>
-                        <TableCell>{getTransactionStatusBadge(transaction.status)}</TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleViewTransaction(transaction)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+          {/* Desktop Table View */}
+          <div className="hidden sm:block">
+            <Card className="border-0 shadow-md">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-black">Item</TableHead>
+                        <TableHead className="text-black">Buyer</TableHead>
+                        <TableHead className="text-black">Seller</TableHead>
+                        <TableHead className="text-black">Amount</TableHead>
+                        <TableHead className="text-black">Date</TableHead>
+                        <TableHead className="text-black">Status</TableHead>
+                        <TableHead className="text-right text-black">Actions</TableHead>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredTransactions.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8 text-black">
+                            No transactions found
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredTransactions.map((transaction) => (
+                          <TableRow key={transaction.id}>
+                            <TableCell className="font-medium text-black">
+                              {transaction.item?.title || 'Unknown Item'}
+                            </TableCell>
+                            <TableCell className="text-black">
+                              {transaction.buyer ? (
+                                <div>
+                                  <p>{transaction.buyer.first_name} {transaction.buyer.last_name}</p>
+                                  <p className="text-xs text-gray-500">{transaction.buyer.email}</p>
+                                </div>
+                              ) : (
+                                'Unknown Buyer'
+                              )}
+                            </TableCell>
+                            <TableCell className="text-black">
+                              {transaction.seller ? (
+                                <div>
+                                  <p>{transaction.seller.first_name} {transaction.seller.last_name}</p>
+                                  <p className="text-xs text-gray-500">{transaction.seller.email}</p>
+                                </div>
+                              ) : (
+                                'Unknown Seller'
+                              )}
+                            </TableCell>
+                            <TableCell className="text-black">{formatPrice(transaction.amount)}</TableCell>
+                            <TableCell className="text-black">{formatDate(transaction.created_at)}</TableCell>
+                            <TableCell>{getTransactionStatusBadge(transaction.status)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleViewTransaction(transaction)}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 
-      {/* Item Details Dialog */}
+      {/* Item Details Dialog - Fixed with proper DialogTitle */}
       <Dialog open={viewItemOpen} onOpenChange={setViewItemOpen}>
-        <DialogContent className="sm:max-w-md md:max-w-lg bg-white text-black border-gray-300">
+        <DialogContent className="max-w-[95%] sm:max-w-md md:max-w-lg bg-white text-black border-gray-300">
           <DialogHeader>
             <DialogTitle className="text-black">Item Details</DialogTitle>
           </DialogHeader>
 
           {selectedItem && (
             <div className="space-y-4">
-              <div className="flex space-x-4">
+<div className="flex flex-col sm:flex-row sm:space-x-4">
                 {getPrimaryImage(selectedItem) && (
-                  <div className="relative h-32 w-32">
+                  <div className="relative h-40 w-full sm:h-32 sm:w-32 mb-3 sm:mb-0">
                     <Image 
                       src={getPrimaryImage(selectedItem)!} 
                       alt={selectedItem.title} 
-                      width={128}
-                      height={128}
+                      fill
                       className="rounded-md object-cover"
                     />
                   </div>
                 )}
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold">{selectedItem.title}</h3>
+                  <h3 className="text-lg font-semibold text-black">{selectedItem.title}</h3>
                   <p className="text-sm text-gray-500">{selectedItem.category?.name || 'Uncategorized'}</p>
-                  <p className="text-lg font-bold mt-2">{formatPrice(selectedItem.price)}</p>
+                  <p className="text-lg font-bold mt-2 text-black">{formatPrice(selectedItem.price)}</p>
                   <div className="mt-2">
                     {getStatusBadge(selectedItem.status)}
                   </div>
@@ -615,48 +729,52 @@ export default function MarketplacePage() {
               </div>
               
               <div>
-                <h4 className="font-medium mb-1">Description</h4>
-                <p className="text-gray-700">{selectedItem.description}</p>
+                <h4 className="font-medium mb-1 text-black">Description</h4>
+                <p className="text-black">{selectedItem.description}</p>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <h4 className="font-medium mb-1">Condition</h4>
-                  <p className="capitalize">{selectedItem.condition.replace('_', ' ')}</p>
+                  <h4 className="font-medium mb-1 text-black">Condition</h4>
+                  <p className="capitalize text-black">{selectedItem.condition.replace('_', ' ')}</p>
                 </div>
                 <div>
-                  <h4 className="font-medium mb-1">Location</h4>
-                  <p>{selectedItem.college?.name || 'Unknown'}</p>
+                  <h4 className="font-medium mb-1 text-black">Location</h4>
+                  <p className="text-black">{selectedItem.college?.name || 'Unknown'}</p>
                 </div>
               </div>
               
               <div>
-                <h4 className="font-medium mb-1">Seller</h4>
+                <h4 className="font-medium mb-1 text-black">Seller</h4>
                 {selectedItem.seller ? (
                   <div>
-                    <p>{selectedItem.seller.first_name} {selectedItem.seller.last_name}</p>
+                    <p className="text-black">{selectedItem.seller.first_name} {selectedItem.seller.last_name}</p>
                     <p className="text-sm text-gray-500">{selectedItem.seller.email}</p>
                   </div>
                 ) : (
-                  <p>Unknown Seller</p>
+                  <p className="text-black">Unknown Seller</p>
                 )}
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <h4 className="font-medium mb-1">Listed On</h4>
-                  <p>{formatDate(selectedItem.created_at)}</p>
+                  <h4 className="font-medium mb-1 text-black">Listed On</h4>
+                  <p className="text-black">{formatDate(selectedItem.created_at)}</p>
                 </div>
                 <div>
-                  <h4 className="font-medium mb-1">Last Updated</h4>
-                  <p>{formatDate(selectedItem.updated_at)}</p>
+                  <h4 className="font-medium mb-1 text-black">Last Updated</h4>
+                  <p className="text-black">{formatDate(selectedItem.updated_at)}</p>
                 </div>
               </div>
             </div>
           )}
           
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setViewItemOpen(false)}>
+          <DialogFooter className="flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setViewItemOpen(false)}
+              className="w-full sm:w-auto text-black border-black hover:bg-gray-100"
+            >
               Close
             </Button>
             {selectedItem && selectedItem.status === 'active' && (
@@ -667,6 +785,7 @@ export default function MarketplacePage() {
                   setViewItemOpen(false);
                 }}
                 disabled={isSubmitting}
+                className="w-full sm:w-auto"
               >
                 Remove Listing
               </Button>
@@ -675,17 +794,17 @@ export default function MarketplacePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Transaction Details Dialog */}
+      {/* Transaction Details Dialog - Fixed with proper DialogTitle */}
       <Dialog open={viewTransactionOpen} onOpenChange={setViewTransactionOpen}>
-        <DialogContent className="sm:max-w-md md:max-w-lg bg-white border-gray-300">
+        <DialogContent className="max-w-[95%] sm:max-w-md md:max-w-lg bg-white border-gray-300">
           <DialogHeader>
-            <DialogTitle>Transaction Details</DialogTitle>
+            <DialogTitle className="text-black">Transaction Details</DialogTitle>
           </DialogHeader>
           
           {selectedTransaction && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-lg font-semibold">
+                <h3 className="text-lg font-semibold text-black">
                   {selectedTransaction.item?.title || 'Unknown Item'}
                 </h3>
                 <div className="mt-2">
@@ -693,63 +812,67 @@ export default function MarketplacePage() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <h4 className="font-medium mb-1">Transaction ID</h4>
-                  <p className="text-sm font-mono">{selectedTransaction.id}</p>
+                  <h4 className="font-medium mb-1 text-black">Transaction ID</h4>
+                  <p className="text-sm font-mono text-black break-all">{selectedTransaction.id}</p>
                 </div>
                 <div>
-                  <h4 className="font-medium mb-1">Amount</h4>
-                  <p className="text-lg font-bold">{formatPrice(selectedTransaction.amount)}</p>
+                  <h4 className="font-medium mb-1 text-black">Amount</h4>
+                  <p className="text-lg font-bold text-black">{formatPrice(selectedTransaction.amount)}</p>
                 </div>
               </div>
               
               <div>
-                <h4 className="font-medium mb-1">Buyer</h4>
+                <h4 className="font-medium mb-1 text-black">Buyer</h4>
                 {selectedTransaction.buyer ? (
                   <div>
-                    <p>{selectedTransaction.buyer.first_name} {selectedTransaction.buyer.last_name}</p>
+                    <p className="text-black">{selectedTransaction.buyer.first_name} {selectedTransaction.buyer.last_name}</p>
                     <p className="text-sm text-gray-500">{selectedTransaction.buyer.email}</p>
                   </div>
                 ) : (
-                  <p>Unknown Buyer</p>
+                  <p className="text-black">Unknown Buyer</p>
                 )}
               </div>
               
               <div>
-                <h4 className="font-medium mb-1">Seller</h4>
+                <h4 className="font-medium mb-1 text-black">Seller</h4>
                 {selectedTransaction.seller ? (
                   <div>
-                    <p>{selectedTransaction.seller.first_name} {selectedTransaction.seller.last_name}</p>
+                    <p className="text-black">{selectedTransaction.seller.first_name} {selectedTransaction.seller.last_name}</p>
                     <p className="text-sm text-gray-500">{selectedTransaction.seller.email}</p>
                   </div>
                 ) : (
-                  <p>Unknown Seller</p>
+                  <p className="text-black">Unknown Seller</p>
                 )}
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <h4 className="font-medium mb-1">Created On</h4>
-                  <p>{formatDate(selectedTransaction.created_at)}</p>
+                  <h4 className="font-medium mb-1 text-black">Created On</h4>
+                  <p className="text-black">{formatDate(selectedTransaction.created_at)}</p>
                 </div>
                 <div>
-                  <h4 className="font-medium mb-1">Last Updated</h4>
-                  <p>{formatDate(selectedTransaction.updated_at)}</p>
+                  <h4 className="font-medium mb-1 text-black">Last Updated</h4>
+                  <p className="text-black">{formatDate(selectedTransaction.updated_at)}</p>
                 </div>
               </div>
               
               {selectedTransaction.notes && (
                 <div>
-                  <h4 className="font-medium mb-1">Notes</h4>
-                  <p className="text-gray-700">{selectedTransaction.notes}</p>
+                  <h4 className="font-medium mb-1 text-black">Notes</h4>
+                  <p className="text-black">{selectedTransaction.notes}</p>
                 </div>
               )}
             </div>
           )}
           
           <DialogFooter>
-            <Button variant="outline" onClick={() => setViewTransactionOpen(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setViewTransactionOpen(false)}
+              className="w-full sm:w-auto text-black border-black hover:bg-gray-100"
+            >
               Close
             </Button>
           </DialogFooter>
