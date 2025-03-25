@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input';
 import { formatDate } from '@/lib/utils';
 import { Eye, CheckCircle, XCircle, User, Edit } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import PickupIntervalSettings from '@/components/admin/PickupIntervalSettings';
 
 // Define interfaces for our data types
 interface Profile {
@@ -526,6 +527,9 @@ export default function VendorsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <PickupIntervalSettings />
+
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
