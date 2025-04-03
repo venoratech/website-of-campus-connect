@@ -25,7 +25,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { formatDate } from '@/lib/utils';
-import { Eye, Edit, User, UserX } from 'lucide-react';
+import { Eye, Edit, User, UserX, CheckSquare } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Image from 'next/image';
 
@@ -87,6 +87,75 @@ export default function UsersPage() {
     setEditIsApproved(selectedUser.is_approved || false);
     setEditIsIdVerified(selectedUser.is_id_verified || false);
     setIsEditing(true);
+  };
+
+  // New function to verify all student IDs
+  const handleVerifyAllIds = async () => {
+    if (profile?.role !== 'admin') return;
+    
+    // Confirm with the admin before proceeding
+    if (!confirm('Are you sure you want to verify all student IDs with uploaded images? This will mark all unverified student IDs as verified.')) return;
+    
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      // Get all student users who have ID images uploaded but aren't verified yet
+      const unverifiedUsers = users.filter(
+        user => user.role === 'student' && user.id_image_url && !user.is_id_verified
+      );
+      
+      if (unverifiedUsers.length === 0) {
+        setSuccess('No unverified student IDs found');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Update each user one by one (we could also create a new API endpoint to do this in bulk)
+      const results = await Promise.all(
+        unverifiedUsers.map(async (user) => {
+          const response = await fetch('/api/update-user-profile', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userId: user.id,
+              isIdVerified: true
+            }),
+          });
+          
+          return { 
+            id: user.id, 
+            success: response.ok 
+          };
+        })
+      );
+      
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.length - successCount;
+      
+      // Update local state
+      setUsers(users.map(u => 
+        unverifiedUsers.some(uu => uu.id === u.id) ? { ...u, is_id_verified: true } : u
+      ));
+      
+      if (selectedUser && unverifiedUsers.some(u => u.id === selectedUser.id)) {
+        setSelectedUser({
+          ...selectedUser,
+          is_id_verified: true
+        });
+      }
+      
+      setSuccess(`Successfully verified ${successCount} student IDs${failCount > 0 ? ` (${failCount} failed)` : ''}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error verifying all IDs';
+      setError(errorMessage);
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSaveUser = async () => {
@@ -275,6 +344,11 @@ export default function UsersPage() {
     pendingVendors: users.filter(u => u.role === 'vendor' && !u.is_approved).length
   };
 
+  // Calculate the count of students with IDs uploaded but not verified yet
+  const unverifiedIdsCount = users.filter(
+    u => u.role === 'student' && u.id_image_url && !u.is_id_verified
+  ).length;
+
   if (isLoading) {
     return <div className="text-black p-4">Loading...</div>;
   }
@@ -370,12 +444,28 @@ export default function UsersPage() {
             </Select>
           </div>
           
-          <Input
-            placeholder="Search users..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-white text-black border-gray-300 h-9 text-sm"
-          />
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            {/* Add Verify All IDs button */}
+            {unverifiedIdsCount > 0 && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleVerifyAllIds}
+                disabled={isSubmitting}
+                className="bg-white text-green-700 border-green-300 hover:bg-green-50"
+              >
+                <CheckSquare className="h-4 w-4 mr-2" />
+                Verify All IDs ({unverifiedIdsCount})
+              </Button>
+            )}
+            
+            <Input
+              placeholder="Search users..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-white text-black border-gray-300 h-9 text-sm"
+            />
+          </div>
         </div>
 
         {/* Mobile User Cards View */}

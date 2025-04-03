@@ -53,8 +53,10 @@ import {
   AlertCircle,
   Trash2,
   Tag,
+  MessageSquare,
 } from 'lucide-react';
 import { formatDate, formatTime } from '@/lib/utils';
+
 
 interface Announcement {
   id: string;
@@ -92,6 +94,14 @@ interface Announcement {
   colleges?: { id: string; college_id: string; college_name?: string }[];
 }
 
+// Stats interface for the dashboard
+interface AnnouncementStats {
+  totalAnnouncements: number;
+  activeAnnouncements: number;
+  popupAnnouncements: number;
+  activePopups: number;
+}
+
 export default function AnnouncementsPage() {
   const { profile, isLoading } = useAuth();
   const router = useRouter();
@@ -101,12 +111,20 @@ export default function AnnouncementsPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  
+  // Dashboard stats
+  const [stats, setStats] = useState<AnnouncementStats>({
+    totalAnnouncements: 0,
+    activeAnnouncements: 0,
+    popupAnnouncements: 0,
+    activePopups: 0
+  });
 
   // State for modal
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  // Fetch announcements and colleges
+  // Fetch announcements, colleges, and stats
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -159,6 +177,24 @@ export default function AnnouncementsPage() {
         );
 
         setAnnouncements(processedAnnouncements);
+
+        // Fetch popup announcements count for stats
+        const { count: popupCount } = await supabase
+          .from('popup_announcements')
+          .select('*', { count: 'exact', head: true });
+        
+        const { count: activePopupCount } = await supabase
+          .from('popup_announcements')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true);
+
+        // Set dashboard stats
+        setStats({
+          totalAnnouncements: processedAnnouncements.length,
+          activeAnnouncements: processedAnnouncements.filter(a => a.is_active).length,
+          popupAnnouncements: popupCount || 0,
+          activePopups: activePopupCount || 0
+        });
       } catch (err) {
         console.error('Error fetching data:', err);
         setError('Failed to load announcements. Please try again.');
@@ -335,14 +371,113 @@ export default function AnnouncementsPage() {
     setSelectedAnnouncement(null);
   };
 
+  // Dashboard stats display
+  const AnnouncementDashboard = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-col">
+            <span className="text-sm text-gray-500">Total Announcements</span>
+            <span className="text-3xl font-bold text-black">{stats.totalAnnouncements}</span>
+          </div>
+        </CardContent>
+      </Card>
+      
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-col">
+            <span className="text-sm text-gray-500">Active Announcements</span>
+            <span className="text-3xl font-bold text-black">{stats.activeAnnouncements}</span>
+          </div>
+        </CardContent>
+      </Card>
+      
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-col">
+            <span className="text-sm text-gray-500">Popup Announcements</span>
+            <span className="text-3xl font-bold text-black">{stats.popupAnnouncements}</span>
+          </div>
+        </CardContent>
+      </Card>
+      
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-col">
+            <span className="text-sm text-gray-500">Active Popups</span>
+            <span className="text-3xl font-bold text-black">{stats.activePopups}</span>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  // Announcement management types
+  const AnnouncementTypes = () => (
+    <div className="flex flex-col md:flex-row gap-4 mb-6">
+      <Card className="flex-1">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-black text-lg">Feed Announcements</CardTitle>
+          <CardDescription className="text-black">
+            Manage announcements that appear in the news feed
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pb-3">
+          <p className="text-sm text-black mb-4">
+            Feed announcements are displayed in the user&apos;s news feed and can include media, links, and promo codes.
+          </p>
+        </CardContent>
+        <CardFooter>
+          <Button 
+            variant="outline" 
+            onClick={() => router.push('/dashboard/announcements/create')}
+            className="w-full"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Create Feed Announcement
+          </Button>
+        </CardFooter>
+      </Card>
+      
+      <Card className="flex-1">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-black text-lg">Popup Announcements</CardTitle>
+          <CardDescription className="text-black">
+            Manage popup announcements shown to users
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pb-3">
+          <p className="text-sm text-black mb-4">
+            Popup announcements display as modal dialogs and are perfect for important notices, special promotions or alerts.
+          </p>
+        </CardContent>
+        <CardFooter>
+          <Button 
+            onClick={() => router.push('/dashboard/popup-announcements')}
+            className="w-full"
+          >
+            <MessageSquare className="h-4 w-4 mr-2" />
+            Manage Popups
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  );
+
   return (
     <div className="container mx-auto py-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-black">Announcements</h1>
-        <Button onClick={() => router.push('/dashboard/announcements/create')}>
-          <Plus className="h-4 w-4 mr-2" />
-          Create Announcement
-        </Button>
+        <h1 className="text-2xl font-bold text-black">Announcements Management</h1>
+        <div className="flex space-x-2">
+          <Button onClick={() => router.push('/dashboard/popup-announcements')}>
+            <MessageSquare className="h-4 w-4 mr-2" />
+            Popups
+          </Button>
+          <Button onClick={() => router.push('/dashboard/announcements/create')}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Announcement
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -351,9 +486,12 @@ export default function AnnouncementsPage() {
         </div>
       )}
 
+      <AnnouncementDashboard />
+      <AnnouncementTypes />
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-black">All Announcements</CardTitle>
+          <CardTitle className="text-black">Feed Announcements</CardTitle>
           <CardDescription className="text-black">
             Manage announcements sent to users
           </CardDescription>
@@ -435,6 +573,12 @@ export default function AnnouncementsPage() {
             </Table>
           )}
         </CardContent>
+        <CardFooter className="justify-center">
+          <Button variant="outline" onClick={() => router.push('/dashboard/popup-announcements')}>
+            <MessageSquare className="h-4 w-4 mr-2" />
+            Manage Popup Announcements
+          </Button>
+        </CardFooter>
       </Card>
 
       {/* Delete Confirmation Dialog */}
