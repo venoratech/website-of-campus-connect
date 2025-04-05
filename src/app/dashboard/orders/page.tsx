@@ -27,8 +27,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatDate, formatTime, formatPrice } from '@/lib/utils';
 import { Eye, ArrowRight, Check, Coffee, Clock } from 'lucide-react';
 import useInterval from '@/lib/useInterval';
+import { CashierInvitations } from '../../../components/cashier/CashierInvitations'; // Import the new component
 
-
+// Original interfaces preserved...
 interface MenuItemRaw {
   id?: string;
   name?: string;
@@ -93,9 +94,8 @@ function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
   );
 }
 
-// Convert types for Supabase query results
+// Helper functions preserved...
 const convertMenuItems = (menuItemsArray: MenuItemRaw | MenuItemRaw[]): MenuItem => {
-  // If menu_items is an array (as in the error message), extract first item
   if (Array.isArray(menuItemsArray)) {
     const firstItem = menuItemsArray[0] || {};
     return {
@@ -105,7 +105,6 @@ const convertMenuItems = (menuItemsArray: MenuItemRaw | MenuItemRaw[]): MenuItem
     };
   }
   
-  // If it's already an object, ensure it has the right shape
   return {
     id: menuItemsArray?.id || '',
     name: menuItemsArray?.name || '',
@@ -147,10 +146,13 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
+  const [showInvitations, setShowInvitations] = useState(true); // Control invitations display
 
   const fetchData = async () => {
     try {
       setError(null);
+      
+      // Handle vendor role
       if (profile?.role === 'vendor') {
         const { data: vendorData, error: vendorError } = await supabase
           .from('food_vendors')
@@ -167,43 +169,33 @@ export default function OrdersPage() {
         }
         
         setVendor(vendorData);
+        await fetchOrdersForVendor(vendorData.id);
+      } 
+      // Handle cashier role
+      else if (profile?.role === 'cashier') {
+        // Get the cashier's associated vendor using the new function
+        const { data, error: vendorError } = await supabase
+          .rpc('get_cashier_vendor', { p_cashier_id: profile.id });
         
-        const { data: ordersData, error: ordersError } = await supabase
-          .from('food_orders')
-          .select('*')
-          .eq('vendor_id', vendorData.id)
-          .order('created_at', { ascending: false });
+        if (vendorError || !data.success) {
+          // If no vendor is associated, we don't show an error - the invitations component will handle it
+          if (data?.message === 'Cashier is not associated with any vendor') {
+            setShowInvitations(true);
+          } else {
+            setError(vendorError?.message || data?.message || 'You are not associated with any vendor');
+          }
+          return;
+        }
         
-        if (ordersError) throw ordersError;
+        // We have a vendor, so we can hide the invitations
+        setShowInvitations(false);
         
-        const ordersWithDetails: OrderWithDetails[] = await Promise.all(
-          ordersData.map(async (order) => {
-            const { data: customerData } = await supabase
-              .from('profiles')
-              .select('id, email, first_name, last_name')
-              .eq('id', order.customer_id)
-              .single();
-            
-            const { data: orderItemsData } = await supabase
-              .from('order_items')
-              .select(`
-                id, quantity, unit_price, subtotal, special_instructions,
-                menu_items (id, name, image_url)
-              `)
-              .eq('order_id', order.id);
-            
-            return {
-              order,
-              orderItems: (orderItemsData || []).map(convertOrderItem),
-              customer: convertCustomer(customerData),
-              vendorName: vendorData.vendor_name
-            };
-          })
-        );
-        
-        setOrders(ordersWithDetails);
-        setLastFetchTime(new Date());
-      } else if (profile?.role === 'admin') {
+        const vendorData = data.vendor;
+        setVendor(vendorData);
+        await fetchOrdersForVendor(vendorData.id);
+      }
+      // Handle admin role
+      else if (profile?.role === 'admin' || profile?.role === 'super_admin') {
         const { data: ordersData, error: ordersError } = await supabase
           .from('food_orders')
           .select('*')
@@ -252,6 +244,45 @@ export default function OrdersPage() {
       setError(errorMessage);
       console.error(err);
     }
+  };
+
+  // Helper function to fetch orders for a specific vendor
+  const fetchOrdersForVendor = async (vendorId: string) => {
+    const { data: ordersData, error: ordersError } = await supabase
+      .from('food_orders')
+      .select('*')
+      .eq('vendor_id', vendorId)
+      .order('created_at', { ascending: false });
+    
+    if (ordersError) throw ordersError;
+    
+    const ordersWithDetails: OrderWithDetails[] = await Promise.all(
+      ordersData.map(async (order) => {
+        const { data: customerData } = await supabase
+          .from('profiles')
+          .select('id, email, first_name, last_name')
+          .eq('id', order.customer_id)
+          .single();
+        
+        const { data: orderItemsData } = await supabase
+          .from('order_items')
+          .select(`
+            id, quantity, unit_price, subtotal, special_instructions,
+            menu_items (id, name, image_url)
+          `)
+          .eq('order_id', order.id);
+        
+        return {
+          order,
+          orderItems: (orderItemsData || []).map(convertOrderItem),
+          customer: convertCustomer(customerData),
+          vendorName: vendor?.vendor_name || 'Unknown Vendor'
+        };
+      })
+    );
+    
+    setOrders(ordersWithDetails);
+    setLastFetchTime(new Date());
   };
 
   useEffect(() => {
@@ -329,6 +360,14 @@ export default function OrdersPage() {
     }
   };
 
+  // Handle when a cashier accepts an invitation
+  const handleInvitationResponded = () => {
+    // Refresh data after a short delay
+    setTimeout(() => {
+      fetchData();
+    }, 1000);
+  };
+
   const getNextStatus = (currentStatus: string): string | null => {
     const statusFlow = {
       'pending': 'confirmed',
@@ -365,11 +404,46 @@ export default function OrdersPage() {
     return <div className="text-black">Loading...</div>;
   }
 
-  if ((profile?.role !== 'vendor' && profile?.role !== 'admin') || (profile?.role === 'vendor' && !vendor)) {
+  // For cashiers with no vendor assignment, show invitations only
+  if (profile?.role === 'cashier' && !vendor && showInvitations) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold tracking-tight text-black">Order Management</h1>
+        <p className="text-black">
+          You currently aren&apos;t associated with any vendor. Accept an invitation to start managing orders.
+        </p>
+        
+        {profile?.id && <CashierInvitations userId={profile.id} onInvitationResponded={handleInvitationResponded} />}
+        
+        <div className="bg-gray-50 p-8 text-center rounded-md border border-gray-200">
+          <h2 className="text-xl font-semibold text-black mb-2">No Vendor Assignment</h2>
+          <p className="text-gray-600 mb-4">You need to be assigned to a vendor before you can manage orders.</p>
+          <p className="text-gray-600">
+            If you don&apos;t see any invitations above, please contact a vendor to invite you.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Updated access check to include cashier role
+  const hasAccess = profile?.role === 'vendor' || profile?.role === 'admin' || 
+                    profile?.role === 'super_admin' || profile?.role === 'cashier';
+  
+  // For vendor and cashier roles, check if vendor data is available
+  const needsVendorSetup = (profile?.role === 'vendor' || profile?.role === 'cashier') && !vendor;
+
+  if (!hasAccess || needsVendorSetup) {
     return (
       <div className="p-4">
         <h1 className="text-xl font-bold text-black">Access Denied</h1>
-        <p className="text-black">You do not have permission to view this page or need to set up your vendor profile first.</p>
+        <p className="text-black">
+          {!hasAccess 
+            ? "You do not have permission to view this page." 
+            : profile?.role === 'vendor' 
+              ? "You need to set up your vendor profile first." 
+              : "You are not associated with any vendor. Please contact an administrator."}
+        </p>
         {profile?.role === 'vendor' && (
           <Button className="mt-4 bg-gray-800 hover:bg-black text-white" asChild>
             <a href="/dashboard/vendor-profile">Set Up Vendor Profile</a>
@@ -400,11 +474,18 @@ export default function OrdersPage() {
         <h1 className="text-3xl font-bold tracking-tight text-black">Order Management</h1>
         <div className="flex justify-between items-center">
           <p className="text-black">
-            {profile.role === 'vendor' ? 'Manage your customer orders' : 'View and manage all orders'}
+            {profile.role === 'admin' || profile.role === 'super_admin' 
+              ? 'View and manage all orders'
+              : `Manage orders for ${vendor?.vendor_name}`}
           </p>
           <LastRefreshed />
         </div>
       </div>
+
+      {/* Show invitations for cashiers if there are any */}
+      {profile?.role === 'cashier' && profile?.id && 
+        <CashierInvitations userId={profile.id} onInvitationResponded={handleInvitationResponded} />
+      }
 
       {error && (
         <div className="bg-red-50 p-4 rounded-md border border-red-300">
@@ -557,7 +638,9 @@ export default function OrdersPage() {
                 <TableRow>
                   <TableHead className="text-black">Order #</TableHead>
                   <TableHead className="text-black">Customer</TableHead>
-                  {profile.role === 'admin' && <TableHead className="text-black">Vendor</TableHead>}
+                  {(profile.role === 'admin' || profile.role === 'super_admin') && 
+                    <TableHead className="text-black">Vendor</TableHead>
+                  }
                   <TableHead className="text-black">Date</TableHead>
                   <TableHead className="text-black">Total</TableHead>
                   <TableHead className="text-black">Status</TableHead>
@@ -567,7 +650,10 @@ export default function OrdersPage() {
               <TableBody>
                 {filteredOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={profile.role === 'admin' ? 7 : 6} className="text-center py-8 text-black">
+                    <TableCell 
+                      colSpan={(profile.role === 'admin' || profile.role === 'super_admin') ? 7 : 6} 
+                      className="text-center py-8 text-black"
+                    >
                       No orders found
                     </TableCell>
                   </TableRow>
@@ -585,7 +671,9 @@ export default function OrdersPage() {
                           'Unknown Customer'
                         )}
                       </TableCell>
-                      {profile.role === 'admin' && <TableCell className="text-black">{orderData.vendorName}</TableCell>}
+                      {(profile.role === 'admin' || profile.role === 'super_admin') && 
+                        <TableCell className="text-black">{orderData.vendorName}</TableCell>
+                      }
                       <TableCell className="text-black">
                         <div>
                           <p>{formatDate(orderData.order.created_at)}</p>

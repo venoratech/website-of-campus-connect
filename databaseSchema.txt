@@ -1,0 +1,2242 @@
+
+-- ===== USER AUTHENTICATION SYSTEM =====
+
+-- Users Table (extends Supabase Auth)
+CREATE TABLE public.profiles (
+    id UUID REFERENCES auth.users NOT NULL PRIMARY KEY,
+    email TEXT NOT NULL,
+    first_name TEXT,
+    last_name TEXT,
+    phone_number TEXT,
+    profile_image_url TEXT,
+    role TEXT NOT NULL CHECK (role IN ('student', 'vendor', 'admin')),
+    college_id UUID REFERENCES public.colleges,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    -- Student-specific fields
+    student_id TEXT,
+    graduation_year INTEGER,
+    
+    -- Vendor-specific fields
+    business_name TEXT,
+    business_description TEXT,
+    business_logo_url TEXT,
+    business_hours JSONB,
+    is_approved BOOLEAN DEFAULT false,
+    
+    CONSTRAINT profiles_email_key UNIQUE (email)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- Policies for profiles table
+CREATE POLICY "Users can view their own profile" 
+ON public.profiles FOR SELECT 
+USING (auth.uid() = id);
+
+CREATE POLICY "Users can update their own profile" 
+ON public.profiles FOR UPDATE 
+USING (auth.uid() = id);
+
+-- Create a trigger to automatically create a profile on signup
+CREATE OR REPLACE FUNCTION public.create_profile_for_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.profiles (id, email, role)
+    VALUES (NEW.id, NEW.email, 'student');
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.create_profile_for_user();
+
+-- ===== COLLEGE DATA STRUCTURE =====
+
+-- Colleges Table
+CREATE TABLE public.colleges (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    name TEXT NOT NULL,
+    address TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    zip_code TEXT NOT NULL,
+    country TEXT NOT NULL,
+    logo_url TEXT,
+    website_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT colleges_name_key UNIQUE (name)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.colleges ENABLE ROW LEVEL SECURITY;
+
+-- Policies for colleges table
+CREATE POLICY "Anyone can view colleges" 
+ON public.colleges FOR SELECT 
+USING (true);
+
+CREATE POLICY "Only admins can insert colleges" 
+ON public.colleges FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+
+CREATE POLICY "Only admins can update colleges" 
+ON public.colleges FOR UPDATE 
+TO authenticated
+USING (EXISTS (
+    SELECT 1 FROM public.profiles 
+    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+));
+
+-- ===== MARKETPLACE DATABASE DESIGN =====
+
+-- Item Categories Table
+CREATE TABLE public.item_categories (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    image_url TEXT,
+    parent_category_id UUID REFERENCES public.item_categories,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT item_categories_name_key UNIQUE (name)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.item_categories ENABLE ROW LEVEL SECURITY;
+
+-- Policies for item_categories table
+CREATE POLICY "Anyone can view item categories" 
+ON public.item_categories FOR SELECT 
+USING (true);
+
+CREATE POLICY "Only admins can manage item categories" 
+ON public.item_categories FOR ALL 
+TO authenticated
+USING (EXISTS (
+    SELECT 1 FROM public.profiles 
+    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+));
+
+-- Items Table
+CREATE TABLE public.marketplace_items (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    price DECIMAL(10, 2) NOT NULL,
+    condition TEXT NOT NULL CHECK (condition IN ('new', 'like_new', 'good', 'fair', 'poor')),
+    seller_id UUID REFERENCES public.profiles NOT NULL,
+    category_id UUID REFERENCES public.item_categories NOT NULL,
+    college_id UUID REFERENCES public.colleges NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'sold', 'reserved', 'deleted')) DEFAULT 'active',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.marketplace_items ENABLE ROW LEVEL SECURITY;
+
+-- Policies for marketplace_items table
+CREATE POLICY "Anyone can view active marketplace items" 
+ON public.marketplace_items FOR SELECT 
+USING (status = 'active' OR seller_id = auth.uid());
+
+CREATE POLICY "Users can insert their own marketplace items" 
+ON public.marketplace_items FOR INSERT 
+TO authenticated
+WITH CHECK (seller_id = auth.uid());
+
+
+CREATE POLICY "Users can update their own marketplace items" 
+ON public.marketplace_items FOR UPDATE 
+TO authenticated
+USING (seller_id = auth.uid());
+
+CREATE POLICY "Users can delete their own marketplace items" 
+ON public.marketplace_items FOR DELETE 
+TO authenticated
+USING (seller_id = auth.uid());
+
+-- Item Images Table
+CREATE TABLE public.item_images (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    item_id UUID REFERENCES public.marketplace_items ON DELETE CASCADE NOT NULL,
+    image_url TEXT NOT NULL,
+    is_primary BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT one_primary_image_per_item UNIQUE (item_id, is_primary) 
+    DEFERRABLE INITIALLY DEFERRED
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.item_images ENABLE ROW LEVEL SECURITY;
+
+-- Policies for item_images table
+CREATE POLICY "Anyone can view item images" 
+ON public.item_images FOR SELECT 
+USING (true);
+
+CREATE POLICY "Users can manage images for their own items" 
+ON public.item_images FOR ALL 
+TO authenticated
+USING (EXISTS (
+    SELECT 1 FROM public.marketplace_items 
+    WHERE marketplace_items.id = item_id AND marketplace_items.seller_id = auth.uid()
+));
+
+-- Marketplace Transactions Table
+CREATE TABLE public.marketplace_transactions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    item_id UUID REFERENCES public.marketplace_items NOT NULL,
+    buyer_id UUID REFERENCES public.profiles NOT NULL,
+    seller_id UUID REFERENCES public.profiles NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('requested', 'accepted', 'completed', 'cancelled')),
+    payment_method TEXT CHECK (payment_method IN ('cash', 'app_payment', 'other')),
+    amount DECIMAL(10, 2) NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT buyer_not_seller CHECK (buyer_id != seller_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.marketplace_transactions ENABLE ROW LEVEL SECURITY;
+
+-- Policies for marketplace_transactions table
+CREATE POLICY "Users can view their own transactions" 
+ON public.marketplace_transactions FOR SELECT 
+TO authenticated
+USING (buyer_id = auth.uid() OR seller_id = auth.uid());
+
+CREATE POLICY "Buyers can insert transaction requests" 
+ON public.marketplace_transactions FOR INSERT 
+TO authenticated
+WITH CHECK (
+    buyer_id = auth.uid() AND 
+    status = 'requested' AND
+    EXISTS (
+        SELECT 1 FROM public.marketplace_items 
+        WHERE marketplace_items.id = item_id AND marketplace_items.status = 'active'
+    )
+);
+
+
+CREATE POLICY "Involved users can update transactions" 
+ON public.marketplace_transactions FOR UPDATE 
+TO authenticated
+USING (buyer_id = auth.uid() OR seller_id = auth.uid());
+
+-- Marketplace Reviews Table
+CREATE TABLE public.marketplace_reviews (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    transaction_id UUID REFERENCES public.marketplace_transactions NOT NULL,
+    reviewer_id UUID REFERENCES public.profiles NOT NULL,
+    reviewee_id UUID REFERENCES public.profiles NOT NULL,
+    rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    comment TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT one_review_per_user_per_transaction UNIQUE (transaction_id, reviewer_id, reviewee_id),
+    CONSTRAINT reviewer_not_reviewee CHECK (reviewer_id != reviewee_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.marketplace_reviews ENABLE ROW LEVEL SECURITY;
+
+-- Policies for marketplace_reviews table
+CREATE POLICY "Anyone can view marketplace reviews" 
+ON public.marketplace_reviews FOR SELECT 
+USING (true);
+
+CREATE POLICY "Users can add reviews for their transactions" 
+ON public.marketplace_reviews FOR INSERT 
+TO authenticated
+WITH CHECK (
+    reviewer_id = auth.uid() AND
+    EXISTS (
+        SELECT 1 FROM public.marketplace_transactions 
+        WHERE marketplace_transactions.id = transaction_id AND 
+        (marketplace_transactions.buyer_id = auth.uid() OR marketplace_transactions.seller_id = auth.uid()) AND
+        marketplace_transactions.status = 'completed'
+    )
+);
+
+
+CREATE POLICY "Users can update their own reviews" 
+ON public.marketplace_reviews FOR UPDATE 
+TO authenticated
+USING (reviewer_id = auth.uid());
+
+-- Conversations Table
+CREATE TABLE public.conversations (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    item_id UUID REFERENCES public.marketplace_items,
+    user1_id UUID REFERENCES public.profiles NOT NULL,
+    user2_id UUID REFERENCES public.profiles NOT NULL,
+    last_message_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT different_users CHECK (user1_id != user2_id),
+    CONSTRAINT unique_conversation UNIQUE (user1_id, user2_id, item_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
+
+-- Policies for conversations table
+CREATE POLICY "Users can view their own conversations" 
+ON public.conversations FOR SELECT 
+TO authenticated
+USING (user1_id = auth.uid() OR user2_id = auth.uid());
+
+CREATE POLICY "Users can start conversations" 
+ON public.conversations FOR INSERT 
+TO authenticated
+WITH CHECK (
+    user1_id = auth.uid() OR
+    user2_id = auth.uid()
+);
+
+
+-- Messages Table
+CREATE TABLE public.messages (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    conversation_id UUID REFERENCES public.conversations NOT NULL,
+    sender_id UUID REFERENCES public.profiles NOT NULL,
+    content TEXT NOT NULL,
+    is_read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+-- Policies for messages table
+CREATE POLICY "Users can view messages in their conversations" 
+ON public.messages FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.conversations 
+        WHERE conversations.id = conversation_id AND 
+        (conversations.user1_id = auth.uid() OR conversations.user2_id = auth.uid())
+    )
+);
+
+CREATE POLICY "Users can send messages in their conversations" 
+ON public.messages FOR INSERT 
+TO authenticated
+WITH CHECK (
+    sender_id = auth.uid() AND
+    EXISTS (
+        SELECT 1 FROM public.conversations 
+        WHERE conversations.id = conversation_id AND 
+        (conversations.user1_id = auth.uid() OR conversations.user2_id = auth.uid())
+    )
+);
+
+-- ===== FOOD SERVICE DATABASE DESIGN =====
+
+-- Vendors Table (linked to profiles)
+CREATE TABLE public.food_vendors (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    profile_id UUID REFERENCES public.profiles NOT NULL,
+    vendor_name TEXT NOT NULL,
+    description TEXT,
+    location TEXT NOT NULL,
+    college_id UUID REFERENCES public.colleges NOT NULL,
+    logo_url TEXT,
+    banner_url TEXT,
+    business_hours JSONB,
+    average_preparation_time INTEGER, -- In minutes
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT unique_vendor_profile UNIQUE (profile_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.food_vendors ENABLE ROW LEVEL SECURITY;
+
+-- Policies for food_vendors table
+CREATE POLICY "Anyone can view active food vendors" 
+ON public.food_vendors FOR SELECT 
+USING (is_active OR profile_id = auth.uid());
+
+CREATE POLICY "Vendors can manage their own vendor profile" 
+ON public.food_vendors FOR ALL 
+TO authenticated
+USING (
+    profile_id = auth.uid() OR
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Menu Categories Table
+CREATE TABLE public.menu_categories (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    vendor_id UUID REFERENCES public.food_vendors NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    display_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT unique_category_per_vendor UNIQUE (vendor_id, name)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.menu_categories ENABLE ROW LEVEL SECURITY;
+
+-- Policies for menu_categories table
+CREATE POLICY "Anyone can view menu categories" 
+ON public.menu_categories FOR SELECT 
+USING (true);
+
+CREATE POLICY "Vendors can manage their own menu categories" 
+ON public.menu_categories FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.food_vendors 
+        WHERE food_vendors.id = vendor_id AND food_vendors.profile_id = auth.uid()
+    )
+);
+
+-- Menu Items Table
+CREATE TABLE public.menu_items (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    vendor_id UUID REFERENCES public.food_vendors NOT NULL,
+    category_id UUID REFERENCES public.menu_categories,
+    name TEXT NOT NULL,
+    description TEXT,
+    price DECIMAL(10, 2) NOT NULL,
+    image_url TEXT,
+    preparation_time INTEGER, -- In minutes
+    is_vegetarian BOOLEAN DEFAULT false,
+    is_vegan BOOLEAN DEFAULT false,
+    is_gluten_free BOOLEAN DEFAULT false,
+    spice_level INTEGER CHECK (spice_level BETWEEN 0 AND 5),
+    allergens TEXT[],
+    is_available BOOLEAN DEFAULT true,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT unique_item_per_vendor UNIQUE (vendor_id, name)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.menu_items ENABLE ROW LEVEL SECURITY;
+
+-- Policies for menu_items table
+CREATE POLICY "Anyone can view menu items" 
+ON public.menu_items FOR SELECT 
+USING (true);
+
+CREATE POLICY "Vendors can manage their own menu items" 
+ON public.menu_items FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.food_vendors 
+        WHERE food_vendors.id = vendor_id AND food_vendors.profile_id = auth.uid()
+    )
+);
+
+-- Item Customization Options Table
+CREATE TABLE public.item_customization_groups (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    menu_item_id UUID REFERENCES public.menu_items ON DELETE CASCADE NOT NULL,
+    name TEXT NOT NULL,
+    is_required BOOLEAN DEFAULT false,
+    min_selections INTEGER DEFAULT 0,
+    max_selections INTEGER,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.item_customization_groups ENABLE ROW LEVEL SECURITY;
+
+-- Policies for item_customization_groups table
+CREATE POLICY "Anyone can view customization groups" 
+ON public.item_customization_groups FOR SELECT 
+USING (true);
+
+CREATE POLICY "Vendors can manage their own customization groups" 
+ON public.item_customization_groups FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.menu_items
+        JOIN public.food_vendors ON menu_items.vendor_id = food_vendors.id
+        WHERE menu_items.id = menu_item_id AND food_vendors.profile_id = auth.uid()
+    )
+);
+
+-- Customization Options Table
+CREATE TABLE public.customization_options (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    group_id UUID REFERENCES public.item_customization_groups ON DELETE CASCADE NOT NULL,
+    name TEXT NOT NULL,
+    price_adjustment DECIMAL(10, 2) DEFAULT 0,
+    is_default BOOLEAN DEFAULT false,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.customization_options ENABLE ROW LEVEL SECURITY;
+
+-- Policies for customization_options table
+CREATE POLICY "Anyone can view customization options" 
+ON public.customization_options FOR SELECT 
+USING (true);
+
+CREATE POLICY "Vendors can manage their own customization options" 
+ON public.customization_options FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.item_customization_groups
+        JOIN public.menu_items ON item_customization_groups.menu_item_id = menu_items.id
+        JOIN public.food_vendors ON menu_items.vendor_id = food_vendors.id
+        WHERE item_customization_groups.id = group_id AND food_vendors.profile_id = auth.uid()
+    )
+);
+
+-- Food Orders Table
+CREATE TABLE public.food_orders (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    order_number TEXT NOT NULL,
+    customer_id UUID REFERENCES public.profiles NOT NULL,
+    vendor_id UUID REFERENCES public.food_vendors NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled')),
+    subtotal DECIMAL(10, 2) NOT NULL,
+    tax DECIMAL(10, 2) NOT NULL,
+    tip DECIMAL(10, 2) DEFAULT 0,
+    total DECIMAL(10, 2) NOT NULL,
+    payment_method TEXT,
+    payment_status TEXT CHECK (payment_status IN ('pending', 'paid', 'failed', 'refunded')),
+    payment_intent_id TEXT,
+    special_instructions TEXT,
+    scheduled_pickup_time TIMESTAMP WITH TIME ZONE,
+    actual_pickup_time TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT unique_order_number UNIQUE (order_number)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.food_orders ENABLE ROW LEVEL SECURITY;
+
+-- Policies for food_orders table
+CREATE POLICY "Customers can view their own orders" 
+ON public.food_orders FOR SELECT 
+TO authenticated
+USING (customer_id = auth.uid());
+
+CREATE POLICY "Vendors can view orders for their business" 
+ON public.food_orders FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.food_vendors 
+        WHERE food_vendors.id = vendor_id AND food_vendors.profile_id = auth.uid()
+    )
+);
+
+CREATE POLICY "Customers can create orders" 
+ON public.food_orders FOR INSERT 
+TO authenticated
+WITH CHECK (customer_id = auth.uid());
+
+CREATE POLICY "Involved users can update orders" 
+ON public.food_orders FOR UPDATE 
+TO authenticated
+USING (
+    customer_id = auth.uid() OR
+    EXISTS (
+        SELECT 1 FROM public.food_vendors 
+        WHERE food_vendors.id = vendor_id AND food_vendors.profile_id = auth.uid()
+    )
+);
+
+-- Order Items Table
+CREATE TABLE public.order_items (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    order_id UUID REFERENCES public.food_orders ON DELETE CASCADE NOT NULL,
+    menu_item_id UUID REFERENCES public.menu_items NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price DECIMAL(10, 2) NOT NULL,
+    subtotal DECIMAL(10, 2) NOT NULL,
+    special_instructions TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
+
+-- Policies for order_items table
+CREATE POLICY "Users can view items for their orders" 
+ON public.order_items FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.food_orders 
+        WHERE food_orders.id = order_id AND 
+        (
+            food_orders.customer_id = auth.uid() OR
+            EXISTS (
+                SELECT 1 FROM public.food_vendors 
+                WHERE food_vendors.id = food_orders.vendor_id AND food_vendors.profile_id = auth.uid()
+            )
+        )
+    )
+);
+
+CREATE POLICY "Customers can add items to their orders" 
+ON public.order_items FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.food_orders 
+        WHERE food_orders.id = order_id AND food_orders.customer_id = auth.uid()
+    )
+);
+
+-- Order Item Customizations Table
+CREATE TABLE public.order_item_customizations (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    order_item_id UUID REFERENCES public.order_items ON DELETE CASCADE NOT NULL,
+    option_id UUID REFERENCES public.customization_options NOT NULL,
+    price_adjustment DECIMAL(10, 2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.order_item_customizations ENABLE ROW LEVEL SECURITY;
+
+-- Policies for order_item_customizations table
+CREATE POLICY "Users can view customizations for their orders" 
+ON public.order_item_customizations FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.order_items
+        JOIN public.food_orders ON order_items.order_id = food_orders.id
+        WHERE order_items.id = order_item_id AND 
+        (
+            food_orders.customer_id = auth.uid() OR
+            EXISTS (
+                SELECT 1 FROM public.food_vendors 
+                WHERE food_vendors.id = food_orders.vendor_id AND food_vendors.profile_id = auth.uid()
+            )
+        )
+    )
+);
+
+CREATE POLICY "Customers can add customizations to their orders" 
+ON public.order_item_customizations FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.order_items
+        JOIN public.food_orders ON order_items.order_id = food_orders.id
+        WHERE order_items.id = order_item_id AND food_orders.customer_id = auth.uid()
+    )
+);
+
+-- Promotions Table
+CREATE TABLE public.promotions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    vendor_id UUID REFERENCES public.food_vendors,
+    name TEXT NOT NULL,
+    description TEXT,
+    discount_type TEXT NOT NULL CHECK (discount_type IN ('percentage', 'fixed_amount')),
+    discount_value DECIMAL(10, 2) NOT NULL,
+    code TEXT,
+    min_order_amount DECIMAL(10, 2),
+    max_discount_amount DECIMAL(10, 2),
+    start_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    end_date TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN DEFAULT true,
+    usage_limit INTEGER,
+    current_usage INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT valid_dates CHECK (end_date IS NULL OR end_date > start_date)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.promotions ENABLE ROW LEVEL SECURITY;
+
+-- Policies for promotions table
+CREATE POLICY "Anyone can view active promotions" 
+ON public.promotions FOR SELECT 
+USING (is_active AND (end_date IS NULL OR end_date > now()) AND (usage_limit IS NULL OR current_usage < usage_limit));
+
+CREATE POLICY "Vendors can manage their own promotions" 
+ON public.promotions FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.food_vendors 
+        WHERE food_vendors.id = vendor_id AND food_vendors.profile_id = auth.uid()
+    )
+);
+
+-- Food Order Ratings Table
+CREATE TABLE public.food_order_ratings (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    order_id UUID REFERENCES public.food_orders NOT NULL,
+    customer_id UUID REFERENCES public.profiles NOT NULL,
+    vendor_id UUID REFERENCES public.food_vendors NOT NULL,
+    food_rating INTEGER NOT NULL CHECK (food_rating BETWEEN 1 AND 5),
+    service_rating INTEGER NOT NULL CHECK (service_rating BETWEEN 1 AND 5),
+    comment TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT one_rating_per_order UNIQUE (order_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.food_order_ratings ENABLE ROW LEVEL SECURITY;
+
+-- Policies for food_order_ratings table
+CREATE POLICY "Anyone can view food ratings" 
+ON public.food_order_ratings FOR SELECT 
+USING (true);
+
+CREATE POLICY "Customers can rate their own orders" 
+ON public.food_order_ratings FOR INSERT 
+TO authenticated
+WITH CHECK (
+    customer_id = auth.uid() AND
+    EXISTS (
+        SELECT 1 FROM public.food_orders 
+        WHERE food_orders.id = order_id AND 
+        food_orders.customer_id = auth.uid() AND
+        food_orders.status = 'completed'
+    )
+);
+
+CREATE POLICY "Customers can update their own ratings" 
+ON public.food_order_ratings FOR UPDATE 
+TO authenticated
+USING (customer_id = auth.uid());
+
+-- ===== NOTIFICATIONS SYSTEM =====
+
+-- Notifications Table
+CREATE TABLE public.notifications (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES public.profiles NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    data JSONB,
+    is_read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+-- Policies for notifications table
+CREATE POLICY "Users can view their own notifications" 
+ON public.notifications FOR SELECT 
+TO authenticated
+USING (user_id = auth.uid());
+
+CREATE POLICY "Users can update their own notifications" 
+ON public.notifications FOR UPDATE 
+TO authenticated
+USING (user_id = auth.uid());
+
+-- Create functions for automatically generating notifications
+
+-- Function to notify when order status changes
+CREATE OR REPLACE FUNCTION notify_order_status_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status != OLD.status THEN
+        -- Notify customer
+        INSERT INTO public.notifications (user_id, type, title, message, data)
+        VALUES (
+            NEW.customer_id,
+            'order_status_' || NEW.status,
+            'Order Status Update',
+            'Your order #' || NEW.order_number || ' is now ' || NEW.status,
+            jsonb_build_object('order_id', NEW.id, 'status', NEW.status)
+        );
+        
+        -- Notify vendor if order is new
+        IF NEW.status = 'pending' THEN
+            INSERT INTO public.notifications (user_id, type, title, message, data)
+            SELECT 
+                food_vendors.profile_id,
+                'new_order',
+                'New Order Received',
+                'You have received a new order #' || NEW.order_number,
+                jsonb_build_object('order_id', NEW.id)
+            FROM public.food_vendors
+            WHERE food_vendors.id = NEW.vendor_id;
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_order_status_change
+    AFTER UPDATE ON public.food_orders
+    FOR EACH ROW
+    WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION notify_order_status_change();
+
+-- Function to notify when a new marketplace message is received
+CREATE OR REPLACE FUNCTION notify_new_message()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Find the recipient user
+    INSERT INTO public.notifications (user_id, type, title, message, data)
+    SELECT 
+        CASE
+            WHEN c.user1_id = NEW.sender_id THEN c.user2_id
+            ELSE c.user1_id
+        END,
+        'new_message',
+        'New Message',
+        substr(NEW.content, 1, 50) || CASE WHEN length(NEW.content) > 50 THEN '...' ELSE '' END,
+        jsonb_build_object('conversation_id', NEW.conversation_id, 'message_id', NEW.id)
+    FROM public.conversations c
+    WHERE c.id = NEW.conversation_id;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_new_message
+    AFTER INSERT ON public.messages
+    FOR EACH ROW
+    EXECUTE FUNCTION notify_new_message();
+
+-- Function to notify when a marketplace transaction status changes
+CREATE OR REPLACE FUNCTION notify_transaction_status_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status != OLD.status THEN
+        -- Notify buyer
+        INSERT INTO public.notifications (user_id, type, title, message, data)
+        VALUES (
+            NEW.buyer_id,
+            'transaction_' || NEW.status,
+            'Transaction Update',
+            'Your purchase request is now ' || NEW.status,
+            jsonb_build_object('transaction_id', NEW.id, 'status', NEW.status)
+        );
+        
+        -- Notify seller
+        INSERT INTO public.notifications (user_id, type, title, message, data)
+        VALUES (
+            NEW.seller_id,
+            'transaction_' || NEW.status,
+            'Transaction Update',
+            'A purchase request for your item is now ' || NEW.status,
+            jsonb_build_object('transaction_id', NEW.id, 'status', NEW.status)
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+================
+
+-- Allow authenticated users to upload
+CREATE POLICY "allow_authenticated_upload" ON storage.objects
+FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'menu-images');
+
+-- Allow authenticated users to read
+CREATE POLICY "allow_authenticated_read" ON storage.objects
+FOR SELECT TO authenticated
+USING (bucket_id = 'menu-images');
+
+CREATE POLICY "allow_authenticated_upload_to_item_images" ON storage.objects
+FOR INSERT
+TO authenticated
+WITH CHECK (bucket_id = 'item-images');
+
+CREATE POLICY "allow_public_read_from_item_images" ON storage.objects
+FOR SELECT
+TO authenticated, anon
+USING (bucket_id = 'item-images');
+
+
+-- Add this policy if it doesn't exist
+CREATE POLICY "Anyone can view basic profile info" 
+ON public.profiles
+FOR SELECT 
+USING (true);
+
+
+-- Allows users to view basic profile information
+CREATE POLICY "Anyone can view profiles"
+ON public.profiles
+FOR SELECT
+USING (true);
+
+-- Allows users to create conversations
+CREATE POLICY "Users can create conversations"
+ON public.conversations
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+-- Allows users to view their own conversations
+CREATE POLICY "Users can view their own conversations"
+ON public.conversations
+FOR SELECT
+TO authenticated
+USING (user1_id = auth.uid() OR user2_id = auth.uid());
+
+CREATE POLICY "Users can mark messages as read in their conversations" 
+ON public.messages FOR UPDATE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.conversations 
+        WHERE conversations.id = conversation_id AND 
+        (conversations.user1_id = auth.uid() OR conversations.user2_id = auth.uid())
+    )
+);
+
+CREATE POLICY "Anyone can view basic public profile information" 
+ON public.profiles FOR SELECT 
+USING (true);
+
+
+CREATE POLICY "Users can view profiles of users they have conversations with" 
+ON public.profiles FOR SELECT 
+USING (
+    EXISTS (
+        SELECT 1 FROM public.conversations 
+        WHERE (conversations.user1_id = id AND conversations.user2_id = auth.uid())
+        OR (conversations.user2_id = id AND conversations.user1_id = auth.uid())
+    )
+);
+
+
+-- Add a QR code verification table
+CREATE TABLE public.transaction_verifications (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    transaction_id UUID REFERENCES public.marketplace_transactions NOT NULL,
+    verification_code TEXT NOT NULL,
+    is_verified BOOLEAN DEFAULT false,
+    verified_by UUID REFERENCES public.profiles,
+    verified_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT unique_verification_code UNIQUE (verification_code)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.transaction_verifications ENABLE ROW LEVEL SECURITY;
+
+-- Policies for transaction_verifications table
+CREATE POLICY "Involved users can view transaction verifications" 
+ON public.transaction_verifications FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.marketplace_transactions 
+        WHERE marketplace_transactions.id = transaction_id AND 
+        (marketplace_transactions.buyer_id = auth.uid() OR marketplace_transactions.seller_id = auth.uid())
+    )
+);
+
+CREATE POLICY "Involved users can update transaction verifications" 
+ON public.transaction_verifications FOR UPDATE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.marketplace_transactions 
+        WHERE marketplace_transactions.id = transaction_id AND 
+        (marketplace_transactions.buyer_id = auth.uid() OR marketplace_transactions.seller_id = auth.uid())
+    )
+);
+
+
+=====
+
+CREATE POLICY "Involved users can view transaction verifications" 
+ON public.transaction_verifications FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.marketplace_transactions 
+        WHERE marketplace_transactions.id = transaction_id AND 
+        (marketplace_transactions.buyer_id = auth.uid() OR marketplace_transactions.seller_id = auth.uid())
+    )
+);
+
+CREATE POLICY "Involved users can update transaction verifications" 
+ON public.transaction_verifications FOR UPDATE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.marketplace_transactions 
+        WHERE marketplace_transactions.id = transaction_id AND 
+        (marketplace_transactions.buyer_id = auth.uid() OR marketplace_transactions.seller_id = auth.uid())
+    )
+);
+
+CREATE POLICY "Sellers can create transaction verifications" 
+ON public.transaction_verifications FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.marketplace_transactions 
+        WHERE marketplace_transactions.id = transaction_id 
+        AND marketplace_transactions.seller_id = auth.uid()
+    )
+);
+
+
+CREATE POLICY "Users can manage their own profiles" ON public.profiles
+    FOR ALL TO authenticated
+    USING (auth.uid() = id)
+    WITH CHECK (auth.uid() = id);
+
+
+    CREATE OR REPLACE FUNCTION public.create_profile_for_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.profiles (
+        id, 
+        email, 
+        role, 
+        first_name, 
+        last_name, 
+        phone_number
+    )
+    VALUES (
+        NEW.id, 
+        NEW.email, 
+        'student',
+        NEW.raw_user_meta_data->>'first_name',  -- Extract from metadata
+        NEW.raw_user_meta_data->>'last_name',   -- Extract from metadata
+        NEW.raw_user_meta_data->>'phone_number' -- Extract from metadata
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.create_profile_for_user();
+
+ALTER TABLE public.item_images ADD COLUMN display_order INTEGER DEFAULT 999;
+
+
+-- Add a modified constraint that only applies when is_primary is true
+CREATE UNIQUE INDEX one_primary_image_per_item_idx ON public.item_images (item_id) 
+WHERE is_primary = true;
+
+
+ALTER TABLE public.menu_items 
+ADD COLUMN is_deleted BOOLEAN DEFAULT false;
+
+
+-- Add ID verification fields to profiles table
+ALTER TABLE public.profiles 
+ADD COLUMN id_image_url TEXT,
+ADD COLUMN is_id_verified BOOLEAN DEFAULT false;
+
+-- Create an RLS policy so users can upload their ID images
+CREATE POLICY "Users can update their own ID verification" 
+ON public.profiles FOR UPDATE 
+TO authenticated
+USING (auth.uid() = id)
+WITH CHECK (auth.uid() = id);
+
+-- Create a policy so admins can update verification status
+CREATE POLICY "Admins can update user verification status" 
+ON public.profiles FOR UPDATE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+
+-- Add this to your Supabase SQL editor to create a server-side function
+-- This bypasses RLS completely using SECURITY DEFINER
+
+CREATE OR REPLACE FUNCTION update_user_college(user_id UUID, college_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  profile_data JSONB;
+BEGIN
+  -- Update the profile
+  UPDATE profiles
+  SET college_id = update_user_college.college_id,
+      updated_at = NOW()
+  WHERE id = user_id;
+  
+  -- Get the updated profile data
+  SELECT json_build_object(
+    'id', p.id,
+    'email', p.email,
+    'first_name', p.first_name,
+    'last_name', p.last_name,
+    'phone_number', p.phone_number,
+    'profile_image_url', p.profile_image_url,
+    'role', p.role,
+    'college_id', p.college_id,
+    'created_at', p.created_at,
+    'updated_at', p.updated_at,
+    'student_id', p.student_id,
+    'graduation_year', p.graduation_year,
+    'id_image_url', p.id_image_url,
+    'is_id_verified', p.is_id_verified
+  ) INTO profile_data
+  FROM profiles p
+  WHERE p.id = user_id;
+  
+  RETURN profile_data;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Add a policy to restrict who can call this function
+REVOKE ALL ON FUNCTION update_user_college(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION update_user_college(UUID, UUID) TO authenticated;
+
+
+-- Add this to your Supabase SQL editor
+CREATE OR REPLACE FUNCTION update_profile_id_image(user_id UUID, id_image TEXT)
+RETURNS BOOLEAN AS $$
+BEGIN
+  UPDATE profiles
+  SET id_image_url = id_image,
+      is_id_verified = false,
+      updated_at = NOW()
+  WHERE id = user_id;
+  
+  RETURN FOUND;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant access to authenticated users
+GRANT EXECUTE ON FUNCTION update_profile_id_image(UUID, TEXT) TO authenticated;
+
+
+
+
+-- Create a new admin policy that doesn't cause recursion
+-- This uses a direct comparison with the current user's ID
+CREATE POLICY "Admins can manage all profiles" 
+ON public.profiles FOR ALL 
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE users.id = auth.uid() AND users.raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+-- Create a simpler policy for users to manage their own profiles
+CREATE POLICY "Users can manage their own profile" 
+ON public.profiles 
+FOR ALL 
+TO authenticated
+USING (id = auth.uid())
+WITH CHECK (id = auth.uid());
+
+-- Create a read-only public policy (if needed)
+CREATE POLICY "Public read-only access to profiles" 
+ON public.profiles 
+FOR SELECT 
+TO authenticated, anon
+USING (true);
+
+
+-- Run this in your Supabase SQL Editor
+CREATE OR REPLACE FUNCTION update_user_role(user_id UUID, new_role TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER -- This bypasses RLS
+AS $$
+DECLARE
+  result JSONB;
+BEGIN
+  -- Validate role input
+  IF new_role NOT IN ('student', 'vendor', 'admin') THEN
+    RAISE EXCEPTION 'Invalid role: must be student, vendor, or admin';
+  END IF;
+
+  -- Update the profile
+  UPDATE profiles
+  SET role = new_role,
+      updated_at = NOW()
+  WHERE id = user_id;
+  
+  -- Return the updated profile
+  SELECT jsonb_build_object(
+    'id', id,
+    'email', email,
+    'role', role,
+    'updated_at', updated_at
+  ) INTO result
+  FROM profiles
+  WHERE id = user_id;
+  
+  RETURN result;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION update_user_role(UUID, TEXT) TO authenticated;
+
+
+-- Add this in your Supabase SQL Editor
+CREATE POLICY "Admins can view all orders" 
+ON public.food_orders FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+create policy "Admin Uploads"
+on storage.objects
+for insert
+with check (
+  bucket_id = 'college-logos'
+  and auth.uid() is not null
+  and exists (
+    select 1 from profiles
+    where id = auth.uid()
+    and role = 'admin'
+  )
+);
+
+-- Announcements Table
+CREATE TABLE public.announcements (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    college_id UUID REFERENCES public.colleges NOT NULL,
+    creator_id UUID REFERENCES public.profiles NOT NULL,
+    has_media BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    is_pinned BOOLEAN DEFAULT false,
+    scheduled_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    target_audience TEXT[] DEFAULT ARRAY['all']::TEXT[] -- Could be 'all', specific departments, years, etc.
+);
+
+-- Announcement Media Table
+CREATE TABLE public.announcement_media (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    announcement_id UUID REFERENCES public.announcements ON DELETE CASCADE NOT NULL,
+    media_type TEXT NOT NULL, -- 'image', 'video', 'file'
+    media_url TEXT NOT NULL,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Announcement Links Table
+CREATE TABLE public.announcement_links (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    announcement_id UUID REFERENCES public.announcements ON DELETE CASCADE NOT NULL,
+    link_url TEXT NOT NULL,
+    link_title TEXT NOT NULL,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Announcement Reactions Table
+CREATE TABLE public.announcement_reactions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    announcement_id UUID REFERENCES public.announcements ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES public.profiles NOT NULL,
+    reaction_type TEXT NOT NULL, -- 'like', 'important', etc.
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT unique_user_reaction UNIQUE (announcement_id, user_id, reaction_type)
+);
+
+-- Announcement Views Table (track who has seen which announcements)
+CREATE TABLE public.announcement_views (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    announcement_id UUID REFERENCES public.announcements ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES public.profiles NOT NULL,
+    viewed_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT unique_user_view UNIQUE (announcement_id, user_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcement_media ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcement_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcement_reactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.announcement_views ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for announcements
+CREATE POLICY "Anyone can view active announcements for their college" 
+ON public.announcements FOR SELECT 
+USING (
+    is_active AND 
+    (expires_at IS NULL OR expires_at > now()) AND
+    (scheduled_at IS NULL OR scheduled_at <= now()) AND
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.college_id = announcements.college_id
+    )
+);
+
+CREATE POLICY "Admins can manage announcements" 
+ON public.announcements FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- RLS Policies for announcement media
+CREATE POLICY "Anyone can view announcement media" 
+ON public.announcement_media FOR SELECT 
+USING (
+    EXISTS (
+        SELECT 1 FROM public.announcements
+        JOIN public.profiles ON profiles.college_id = announcements.college_id
+        WHERE announcements.id = announcement_id
+        AND profiles.id = auth.uid()
+        AND announcements.is_active = true
+    )
+);
+
+CREATE POLICY "Admins can manage announcement media" 
+ON public.announcement_media FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- RLS Policies for announcement links
+CREATE POLICY "Anyone can view announcement links" 
+ON public.announcement_links FOR SELECT 
+USING (
+    EXISTS (
+        SELECT 1 FROM public.announcements
+        JOIN public.profiles ON profiles.college_id = announcements.college_id
+        WHERE announcements.id = announcement_id
+        AND profiles.id = auth.uid()
+        AND announcements.is_active = true
+    )
+);
+
+CREATE POLICY "Admins can manage announcement links" 
+ON public.announcement_links FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- RLS Policies for reactions
+CREATE POLICY "Users can view all reactions" 
+ON public.announcement_reactions FOR SELECT 
+USING (true);
+
+CREATE POLICY "Users can add their own reactions" 
+ON public.announcement_reactions FOR INSERT 
+TO authenticated
+WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete their own reactions" 
+ON public.announcement_reactions FOR DELETE 
+TO authenticated
+USING (user_id = auth.uid());
+
+-- RLS Policies for views
+CREATE POLICY "Users can mark announcements as viewed" 
+ON public.announcement_views FOR INSERT 
+TO authenticated
+WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can view their own view history" 
+ON public.announcement_views FOR SELECT 
+TO authenticated
+USING (user_id = auth.uid());
+
+-- Storage policy for announcement media
+CREATE POLICY "Anyone can view announcement media" 
+ON storage.objects FOR SELECT
+USING (bucket_id = 'announcement-media');
+
+CREATE POLICY "Admins can upload announcement media" 
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (
+    bucket_id = 'announcement-media' AND
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Add announcement function to create notification when new announcement is created
+CREATE OR REPLACE FUNCTION notify_new_announcement()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Get all users in the college and create notifications for them
+    INSERT INTO public.notifications (user_id, type, title, message, data)
+    SELECT 
+        profiles.id,
+        'new_announcement',
+        'New Announcement',
+        NEW.title,
+        jsonb_build_object('announcement_id', NEW.id)
+    FROM public.profiles
+    WHERE profiles.college_id = NEW.college_id
+    AND profiles.role = 'student';
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_new_announcement
+    AFTER INSERT ON public.announcements
+    FOR EACH ROW
+    WHEN (NEW.is_active = true AND (NEW.scheduled_at IS NULL OR NEW.scheduled_at <= now()))
+    EXECUTE FUNCTION notify_new_announcement();
+
+
+    -- Check if your function exists and update it
+ALTER TABLE public.announcements 
+ADD COLUMN has_promo BOOLEAN DEFAULT false,
+ADD COLUMN promo_code TEXT,
+ADD COLUMN promo_description TEXT;
+
+-- Then modify the create_multi_college_announcement function to accept these parameters
+CREATE OR REPLACE FUNCTION create_multi_college_announcement(
+  p_title TEXT,
+  p_content TEXT,
+  p_creator_id UUID,
+  p_college_ids UUID[],
+  p_is_global BOOLEAN,
+  p_has_media BOOLEAN,
+  p_is_active BOOLEAN,
+  p_is_pinned BOOLEAN,
+  p_scheduled_at TIMESTAMP WITH TIME ZONE,
+  p_expires_at TIMESTAMP WITH TIME ZONE,
+  p_target_audience TEXT[],
+  p_has_promo BOOLEAN DEFAULT false,
+  p_promo_code TEXT DEFAULT NULL,
+  p_promo_description TEXT DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+  v_announcement_id UUID;
+  v_college_id UUID;
+BEGIN
+  -- Insert the announcement
+  INSERT INTO public.announcements (
+    title,
+    content,
+    creator_id,
+    college_id,
+    has_media,
+    is_active,
+    is_pinned,
+    scheduled_at,
+    expires_at,
+    target_audience,
+    is_global,
+    has_promo,              
+    promo_code,             
+    promo_description       
+  ) VALUES (
+    p_title,
+    p_content,
+    p_creator_id,
+    CASE WHEN array_length(p_college_ids, 1) = 1 THEN p_college_ids[1] ELSE NULL END,
+    p_has_media,
+    p_is_active,
+    p_is_pinned,
+    p_scheduled_at,
+    p_expires_at,
+    p_target_audience,
+    p_is_global,
+    p_has_promo,           
+    p_promo_code,          
+    p_promo_description    
+  )
+  RETURNING id INTO v_announcement_id;
+
+  -- If it's not tied to a specific college or global, insert records into the junction table
+  IF NOT p_is_global AND (array_length(p_college_ids, 1) > 1 OR array_length(p_college_ids, 1) IS NULL) THEN
+    FOREACH v_college_id IN ARRAY p_college_ids
+    LOOP
+      INSERT INTO public.announcement_colleges (announcement_id, college_id)
+      VALUES (v_announcement_id, v_college_id);
+    END LOOP;
+  END IF;
+
+  RETURN v_announcement_id;
+END;
+$$;
+
+=============
+
+-- Terms and Conditions Table
+CREATE TABLE public.terms_and_conditions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    type TEXT NOT NULL, -- 'general', 'marketplace', 'food_service', etc.
+    version INTEGER NOT NULL,
+    is_current BOOLEAN DEFAULT false,
+    college_id UUID REFERENCES public.colleges, -- NULL for global terms
+    created_by UUID REFERENCES public.profiles NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT unique_current_version UNIQUE (type, college_id, is_current)
+);
+
+-- User Acceptance Table to track which users have accepted which version
+CREATE TABLE public.terms_acceptance (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    terms_id UUID REFERENCES public.terms_and_conditions NOT NULL,
+    user_id UUID REFERENCES public.profiles NOT NULL,
+    accepted_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    CONSTRAINT unique_user_terms UNIQUE (terms_id, user_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.terms_and_conditions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.terms_acceptance ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for terms_and_conditions table
+-- Anyone can view current terms
+CREATE POLICY "Anyone can view current terms" 
+ON public.terms_and_conditions FOR SELECT 
+USING (
+    is_current = true OR
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Only admins can create/update/delete terms
+CREATE POLICY "Only admins can manage terms" 
+ON public.terms_and_conditions FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- RLS Policies for terms_acceptance table
+-- Users can view their own acceptance records
+CREATE POLICY "Users can view their own acceptance records" 
+ON public.terms_acceptance FOR SELECT 
+TO authenticated
+USING (user_id = auth.uid());
+
+-- Users can insert their own acceptance records
+CREATE POLICY "Users can accept terms" 
+ON public.terms_acceptance FOR INSERT 
+TO authenticated
+WITH CHECK (user_id = auth.uid());
+
+-- Admins can view all acceptance records
+CREATE POLICY "Admins can view all acceptance records" 
+ON public.terms_acceptance FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Create a function to set a terms version as current and update previous versions
+CREATE OR REPLACE FUNCTION set_current_terms_version(terms_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    v_type TEXT;
+    v_college_id UUID;
+BEGIN
+    -- Get the type and college_id of the terms we want to make current
+    SELECT type, college_id INTO v_type, v_college_id
+    FROM public.terms_and_conditions
+    WHERE id = terms_id;
+    
+    -- Set all terms of the same type and college_id to not current
+    UPDATE public.terms_and_conditions
+    SET is_current = false
+    WHERE type = v_type 
+    AND (college_id = v_college_id OR (college_id IS NULL AND v_college_id IS NULL));
+    
+    -- Set the specified terms to current
+    UPDATE public.terms_and_conditions
+    SET is_current = true,
+        updated_at = NOW()
+    WHERE id = terms_id;
+    
+    RETURN true;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION set_current_terms_version(UUID) TO authenticated;
+
+-- Create a function to check if a user has accepted the current terms
+CREATE OR REPLACE FUNCTION has_accepted_current_terms(p_user_id UUID, p_type TEXT, p_college_id UUID DEFAULT NULL)
+RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    v_has_accepted BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.terms_acceptance ta
+        JOIN public.terms_and_conditions tc ON ta.terms_id = tc.id
+        WHERE ta.user_id = p_user_id
+        AND tc.type = p_type
+        AND (tc.college_id = p_college_id OR (tc.college_id IS NULL AND p_college_id IS NULL))
+        AND tc.is_current = true
+    ) INTO v_has_accepted;
+    
+    RETURN v_has_accepted;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION has_accepted_current_terms(UUID, TEXT, UUID) TO authenticated;
+
+ALTER POLICY "Users can accept terms" 
+ON public.terms_acceptance 
+WITH CHECK (user_id = auth.uid());
+
+
+CREATE OR REPLACE FUNCTION accept_terms(p_user_id UUID, p_terms_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+  result JSONB;
+BEGIN
+  -- Insert the acceptance record
+  INSERT INTO public.terms_acceptance (user_id, terms_id)
+  VALUES (p_user_id, p_terms_id)
+  RETURNING jsonb_build_object(
+    'id', id,
+    'user_id', user_id,
+    'terms_id', terms_id,
+    'accepted_at', accepted_at
+  ) INTO result;
+  
+  RETURN result;
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION accept_terms(UUID, UUID) TO authenticated;
+
+-- Create a simplified system configurations table just for the pickup interval
+CREATE TABLE public.system_configurations (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.system_configurations ENABLE ROW LEVEL SECURITY;
+
+-- Policies for system_configurations table
+CREATE POLICY "Anyone can view system configurations" 
+ON public.system_configurations FOR SELECT 
+USING (true);
+
+CREATE POLICY "Only admins can manage system configurations" 
+ON public.system_configurations FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Insert default pickup time interval
+INSERT INTO public.system_configurations (key, value)
+VALUES ('pickup_interval', '{"minutes": 15}');
+
+
+-- Direct Expo Push API call function
+CREATE OR REPLACE FUNCTION send_push_notification(
+  user_id UUID,
+  title TEXT,
+  body TEXT,
+  data JSONB
+) RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  tokens_json JSONB;
+  messages_json JSONB;
+  result JSONB;
+BEGIN
+  -- Get push tokens for the user
+  SELECT jsonb_agg(token) INTO tokens_json
+  FROM push_tokens
+  WHERE push_tokens.user_id = send_push_notification.user_id;
+  
+  -- If no tokens found, return early
+  IF tokens_json IS NULL OR jsonb_array_length(tokens_json) = 0 THEN
+    RETURN jsonb_build_object('status', 'no_tokens', 'message', 'No push tokens found for user');
+  END IF;
+  
+  -- Build messages array
+  SELECT jsonb_agg(
+    jsonb_build_object(
+      'to', token,
+      'sound', 'default',
+      'title', title,
+      'body', body,
+      'data', data,
+      'badge', 1
+    )
+  ) INTO messages_json
+  FROM jsonb_array_elements_text(tokens_json) AS token;
+  
+  -- Call Expo Push API
+  SELECT content::jsonb INTO result
+  FROM http((
+    'POST',
+    'https://exp.host/--/api/v2/push/send',
+    ARRAY[('Accept', 'application/json'), ('Content-Type', 'application/json')],
+    'application/json',
+    messages_json
+  )::http_request);
+  
+  RETURN result;
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE 'Error sending push notification: %', SQLERRM;
+    RETURN jsonb_build_object('error', SQLERRM);
+END;
+$$;
+
+-- Trigger function for order status changes
+CREATE OR REPLACE FUNCTION notify_order_status_push()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only proceed if status has changed
+  IF OLD.status IS DISTINCT FROM NEW.status THEN
+    -- Send push notification to customer
+    PERFORM send_push_notification(
+      NEW.customer_id,
+      'Order Update',
+      'Your order #' || NEW.order_number || ' is now ' || NEW.status,
+      jsonb_build_object(
+        'type', 'order_status_' || NEW.status,
+        'order_id', NEW.id
+      )
+    );
+    
+    -- If order has just been placed, notify vendor
+    IF NEW.status = 'pending' AND OLD.status IS NULL THEN
+      -- Get vendor's user ID
+      DECLARE
+        vendor_user_id UUID;
+      BEGIN
+        SELECT profile_id INTO vendor_user_id
+        FROM food_vendors
+        WHERE id = NEW.vendor_id;
+        
+        IF vendor_user_id IS NOT NULL THEN
+          PERFORM send_push_notification(
+            vendor_user_id,
+            'New Order',
+            'You have received a new order #' || NEW.order_number,
+            jsonb_build_object(
+              'type', 'new_order',
+              'order_id', NEW.id
+            )
+          );
+        END IF;
+      END;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for order status updates
+DROP TRIGGER IF EXISTS order_status_push_notification ON food_orders;
+CREATE TRIGGER order_status_push_notification
+AFTER UPDATE ON food_orders
+FOR EACH ROW
+EXECUTE FUNCTION notify_order_status_push();
+
+-- Trigger function for new announcements
+CREATE OR REPLACE FUNCTION notify_announcement_push()
+RETURNS TRIGGER AS $$
+DECLARE
+  user_record RECORD;
+BEGIN
+  -- Don't notify for non-active or scheduled announcements
+  IF NOT NEW.is_active OR (NEW.scheduled_at IS NOT NULL AND NEW.scheduled_at > NOW()) THEN
+    RETURN NEW;
+  END IF;
+
+  -- For college-specific announcements
+  IF NEW.college_id IS NOT NULL THEN
+    -- Get all users in this college except the creator
+    FOR user_record IN 
+      SELECT id FROM profiles 
+      WHERE college_id = NEW.college_id AND id != NEW.creator_id
+    LOOP
+      PERFORM send_push_notification(
+        user_record.id,
+        NEW.title,
+        substr(NEW.content, 1, 100) || CASE WHEN length(NEW.content) > 100 THEN '...' ELSE '' END,
+        jsonb_build_object(
+          'type', 'new_announcement',
+          'announcement_id', NEW.id
+        )
+      );
+    END LOOP;
+  END IF;
+  
+  -- For global announcements
+  IF NEW.is_global THEN
+    -- Get all users except the creator
+    FOR user_record IN 
+      SELECT id FROM profiles 
+      WHERE id != NEW.creator_id
+    LOOP
+      PERFORM send_push_notification(
+        user_record.id,
+        NEW.title,
+        substr(NEW.content, 1, 100) || CASE WHEN length(NEW.content) > 100 THEN '...' ELSE '' END,
+        jsonb_build_object(
+          'type', 'new_announcement',
+          'announcement_id', NEW.id
+        )
+      );
+    END LOOP;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for new announcements
+DROP TRIGGER IF EXISTS announcement_push_notification ON announcements;
+CREATE TRIGGER announcement_push_notification
+AFTER INSERT ON announcements
+FOR EACH ROW
+EXECUTE FUNCTION notify_announcement_push();
+
+-- Trigger function for new messages
+CREATE OR REPLACE FUNCTION notify_message_push()
+RETURNS TRIGGER AS $$
+DECLARE
+  recipient_id UUID;
+  sender_name TEXT;
+  item_title TEXT;
+BEGIN
+  -- Find the recipient (the user who didn't send the message)
+  SELECT 
+    CASE 
+      WHEN c.user1_id = NEW.sender_id THEN c.user2_id
+      ELSE c.user1_id
+    END INTO recipient_id
+  FROM conversations c
+  WHERE c.id = NEW.conversation_id;
+  
+  -- If we found a recipient and it's not the sender
+  IF recipient_id IS NOT NULL AND recipient_id != NEW.sender_id THEN
+    -- Get sender's name
+    SELECT 
+      COALESCE(first_name || ' ' || last_name, 'User') INTO sender_name
+    FROM profiles
+    WHERE id = NEW.sender_id;
+    
+    -- Get item title if this conversation is about an item
+    SELECT 
+      i.title INTO item_title
+    FROM conversations c
+    JOIN marketplace_items i ON c.item_id = i.id
+    WHERE c.id = NEW.conversation_id;
+    
+    -- Send push notification
+    PERFORM send_push_notification(
+      recipient_id,
+      sender_name,
+      substr(NEW.content, 1, 100) || CASE WHEN length(NEW.content) > 100 THEN '...' ELSE '' END,
+      jsonb_build_object(
+        'type', 'new_message',
+        'conversation_id', NEW.conversation_id,
+        'message_id', NEW.id,
+        'sender_id', NEW.sender_id,
+        'sender_name', sender_name,
+        'item_title', item_title
+      )
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for new messages
+DROP TRIGGER IF EXISTS message_push_notification ON messages;
+CREATE TRIGGER message_push_notification
+AFTER INSERT ON messages
+FOR EACH ROW
+EXECUTE FUNCTION notify_message_push();
+
+SELECT proname FROM pg_proc WHERE proname = 'send_push_notification';
+
+
+CREATE OR REPLACE FUNCTION notify_order_status_push()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Add debug logging
+  RAISE NOTICE 'Order status change: % -> % for order %', 
+    OLD.status, NEW.status, NEW.id;
+    
+  -- Only proceed if status has actually changed
+  IF OLD.status IS DISTINCT FROM NEW.status THEN
+    -- Send push notification to customer with more debugging
+    RAISE NOTICE 'Sending push notification to customer %', NEW.customer_id;
+    
+    PERFORM send_push_notification(
+      NEW.customer_id,
+      'Order Update',
+      'Your order #' || NEW.order_number || ' is now ' || NEW.status,
+      jsonb_build_object(
+        'type', 'order_status_' || NEW.status,
+        'order_id', NEW.id
+      )
+    );
+    
+    -- For first-time notifications
+    IF NEW.status = 'confirmed' AND OLD.status = 'pending' THEN
+      -- Get vendor's user ID
+      DECLARE
+        vendor_user_id UUID;
+      BEGIN
+        SELECT profile_id INTO vendor_user_id
+        FROM food_vendors
+        WHERE id = NEW.vendor_id;
+        
+        IF vendor_user_id IS NOT NULL THEN
+          RAISE NOTICE 'Sending new order notification to vendor %', vendor_user_id;
+          
+          PERFORM send_push_notification(
+            vendor_user_id,
+            'New Order',
+            'You have received a new order #' || NEW.order_number,
+            jsonb_build_object(
+              'type', 'new_order',
+              'order_id', NEW.id
+            )
+          );
+        END IF;
+      END;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- Create the popup_announcements table
+CREATE TABLE public.popup_announcements (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    title TEXT NOT NULL,
+    subtitle TEXT,
+    content TEXT NOT NULL,
+    image_url TEXT,
+    button_text TEXT,
+    button_link TEXT,
+    is_active BOOLEAN DEFAULT false,
+    show_once_per_user BOOLEAN DEFAULT true,
+    start_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    end_date TIMESTAMP WITH TIME ZONE,
+    college_id UUID REFERENCES public.colleges,
+    is_global BOOLEAN DEFAULT false,
+    created_by UUID REFERENCES public.profiles NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    target_audience TEXT[] DEFAULT ARRAY['all']::TEXT[]
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.popup_announcements ENABLE ROW LEVEL SECURITY;
+
+-- Add RLS policies
+CREATE POLICY "Anyone can view active popup announcements" 
+ON public.popup_announcements FOR SELECT 
+USING (
+    is_active AND 
+    (end_date IS NULL OR end_date > now()) AND
+    (start_date <= now())
+);
+
+CREATE POLICY "Admins can manage popup announcements" 
+ON public.popup_announcements FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Create a table to track which users have seen each popup
+CREATE TABLE public.popup_announcement_views (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    popup_id UUID REFERENCES public.popup_announcements ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES public.profiles NOT NULL,
+    viewed_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT unique_popup_user_view UNIQUE (popup_id, user_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.popup_announcement_views ENABLE ROW LEVEL SECURITY;
+
+-- Add RLS policies for views
+CREATE POLICY "Users can view their own popup views" 
+ON public.popup_announcement_views FOR SELECT 
+TO authenticated
+USING (user_id = auth.uid());
+
+CREATE POLICY "Users can add their own popup views" 
+ON public.popup_announcement_views FOR INSERT 
+TO authenticated
+WITH CHECK (user_id = auth.uid());
+
+-- Add storage bucket policy for popup images
+CREATE POLICY "Anyone can view popup announcement images" 
+ON storage.objects FOR SELECT
+USING (bucket_id = 'popup-images');
+
+CREATE POLICY "Admins can upload popup images" 
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (
+    bucket_id = 'popup-images' AND
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Function to get active popup announcements for a user
+CREATE OR REPLACE FUNCTION get_active_popup_announcements(p_user_id UUID)
+RETURNS SETOF popup_announcements
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_college_id UUID;
+BEGIN
+    -- Get the user's college ID
+    SELECT college_id INTO v_college_id
+    FROM profiles
+    WHERE id = p_user_id;
+    
+    RETURN QUERY
+    SELECT pa.*
+    FROM popup_announcements pa
+    WHERE pa.is_active = true
+    AND (pa.end_date IS NULL OR pa.end_date > now())
+    AND pa.start_date <= now()
+    AND (
+        pa.is_global = true 
+        OR 
+        (pa.college_id = v_college_id AND v_college_id IS NOT NULL)
+    )
+    AND (
+        pa.show_once_per_user = false
+        OR
+        NOT EXISTS (
+            SELECT 1 FROM popup_announcement_views pav
+            WHERE pav.popup_id = pa.id AND pav.user_id = p_user_id
+        )
+    )
+    ORDER BY pa.created_at DESC;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION get_active_popup_announcements(UUID) TO authenticated;
+
+-- Ensure email uniqueness in auth.users table
+ALTER TABLE auth.users ADD CONSTRAINT users_email_key UNIQUE (email);
+
+-- Make sure profiles.email is also constrained
+ALTER TABLE public.profiles ADD CONSTRAINT profiles_email_key UNIQUE (email);
+
+-- Remove the problematic policies first
+DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Users can manage their own profile" ON public.profiles;
+
+-- Create a simpler policy for users to manage their own profiles
+CREATE POLICY "Users can manage their own profiles" 
+ON public.profiles 
+FOR ALL 
+TO authenticated
+USING (auth.uid() = id);
+
+-- Create an admin policy that uses auth.users metadata instead of profiles table
+CREATE POLICY "Admins can manage all profiles" 
+ON public.profiles 
+FOR ALL 
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE users.id = auth.uid() AND users.raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+
+-- Create the popup_announcement_colleges junction table for many-to-many relationship
+CREATE TABLE public.popup_announcement_colleges (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    popup_id UUID REFERENCES public.popup_announcements ON DELETE CASCADE NOT NULL,
+    college_id UUID REFERENCES public.colleges NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    
+    -- Add unique constraint to prevent duplicate associations
+    CONSTRAINT unique_popup_college UNIQUE (popup_id, college_id)
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.popup_announcement_colleges ENABLE ROW LEVEL SECURITY;
+
+-- RLS policies for the junction table
+CREATE POLICY "Anyone can view popup_announcement_colleges" 
+ON public.popup_announcement_colleges FOR SELECT 
+USING (true);
+
+CREATE POLICY "Admins can manage popup_announcement_colleges" 
+ON public.popup_announcement_colleges FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Modify the get_active_popup_announcements function to support multiple colleges
+CREATE OR REPLACE FUNCTION get_active_popup_announcements(p_user_id UUID)
+RETURNS SETOF popup_announcements
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_college_id UUID;
+BEGIN
+    -- Get the user's college ID
+    SELECT college_id INTO v_college_id
+    FROM profiles
+    WHERE id = p_user_id;
+    
+    RETURN QUERY
+    SELECT DISTINCT pa.*
+    FROM popup_announcements pa
+    LEFT JOIN popup_announcement_colleges pac ON pa.id = pac.popup_id
+    WHERE 
+        pa.is_active = true
+        AND (pa.end_date IS NULL OR pa.end_date > now())
+        AND pa.start_date <= now()
+        AND (
+            -- Global announcements
+            pa.is_global = true 
+            OR 
+            -- Direct college match
+            (pa.college_id = v_college_id AND v_college_id IS NOT NULL)
+            OR
+            -- Match from the junction table
+            (pac.college_id = v_college_id AND v_college_id IS NOT NULL)
+        )
+        AND (
+            pa.show_once_per_user = false
+            OR
+            NOT EXISTS (
+                SELECT 1 FROM popup_announcement_views pav
+                WHERE pav.popup_id = pa.id AND pav.user_id = p_user_id
+            )
+        )
+    ORDER BY pa.created_at DESC;
+END;
+$$;

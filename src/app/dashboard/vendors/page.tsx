@@ -84,7 +84,7 @@ export default function VendorsPage() {
 
   useEffect(() => {
     const fetchVendors = async () => {
-      if (profile?.role !== 'admin') {
+      if (profile?.role !== 'admin' && profile?.role !== 'vendor_manager' && profile?.role !== 'super_admin') {
         // Redirect or show error if not an admin
         setError('Only administrators can access this page');
         return;
@@ -456,7 +456,7 @@ export default function VendorsPage() {
     return <div className="text-black">Loading...</div>;
   }
 
-  if (profile?.role !== 'admin') {
+  if (profile?.role !== 'admin' && profile?.role !== 'vendor_manager' && profile?.role !== 'super_admin') {
     return (
       <div className="p-4">
         <h1 className="text-xl font-bold text-black">Access Denied</h1>

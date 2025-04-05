@@ -199,7 +199,7 @@ export default function PopupAnnouncementsPage() {
 
   // Redirect if not an admin
   useEffect(() => {
-    if (!isLoading && profile && profile.role !== 'admin') {
+    if (!isLoading && profile && profile.role !== 'admin' && profile.role !== 'super_admin'&& profile.role !== 'content_manager') {
       router.push('/dashboard');
     }
   }, [isLoading, profile, router]);
@@ -208,7 +208,7 @@ export default function PopupAnnouncementsPage() {
     return <div className="text-center p-8 text-black">Loading...</div>;
   }
 
-  if (!profile || profile.role !== 'admin') {
+  if (!profile || profile.role !== 'admin' && profile.role !=='super_admin'&& profile.role !=='content_manager') {
     return null;
   }
 

@@ -1,4 +1,3 @@
-// app/dashboard/terms/page.tsx
 'use client';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -57,8 +56,9 @@ export default function TermsAdminPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'create' | 'edit' | 'preview'>('create');
 
+  // Updated access check: allow if role is admin OR super_admin
   useEffect(() => {
-    if (!isLoading && (!user || profile?.role !== 'admin')) {
+    if (!isLoading && (!user || !['admin', 'super_admin','content_manager'].includes(profile?.role || ''))) {
       router.push('/dashboard');
     }
   }, [user, profile, isLoading, router]);
@@ -103,7 +103,7 @@ export default function TermsAdminPage() {
       }
     };
     
-    if (user && profile?.role === 'admin') {
+    if (user && ['admin', 'super_admin','content_manager'].includes(profile?.role || '')) {
       fetchData();
     }
   }, [user, profile]);
@@ -211,7 +211,7 @@ export default function TermsAdminPage() {
     );
   }
 
-  if (!user || profile?.role !== 'admin') {
+  if (!user || !['admin', 'super_admin','content_manager'].includes(profile?.role || '')) {
     return null;
   }
 

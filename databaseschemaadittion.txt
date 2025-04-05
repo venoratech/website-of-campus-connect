@@ -1,0 +1,513 @@
+-- Add an enum type for the expanded role system while maintaining backward compatibility
+-- Note: We'll extend the existing 'role' column in profiles table to include the new detailed roles
+
+-- Step 1: Add the new roles to the existing check constraint
+ALTER TABLE public.profiles
+DROP CONSTRAINT IF EXISTS profiles_role_check;
+
+ALTER TABLE public.profiles
+ADD CONSTRAINT profiles_role_check 
+CHECK (role IN (
+    'student', 'vendor', 'admin', -- Original roles
+    'super_admin', 'vendor_manager', 'marketplace_moderator', 
+    'user_support_admin', 'analytics_manager', 'content_manager', 'cashier'
+));
+
+-- Step 1: Create a dedicated roles table with a unique list of allowed roles
+CREATE TABLE public.roles (
+    role_name TEXT PRIMARY KEY
+);
+
+-- Step 2: Populate the roles table with allowed roles
+INSERT INTO public.roles (role_name) VALUES
+('student'),
+('vendor'),
+('admin'),
+('super_admin'),
+('vendor_manager'),
+('marketplace_moderator'),
+('user_support_admin'),
+('analytics_manager'),
+('content_manager'),
+('cashier');
+
+-- Step 3: Create the role_permissions table that references the roles table
+CREATE TABLE public.role_permissions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    role_name TEXT NOT NULL REFERENCES public.roles(role_name),
+    permissions JSONB NOT NULL, -- Store permissions as JSON
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT unique_role UNIQUE (role_name)
+);
+
+
+-- Step 3: Enable Row Level Security
+ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
+
+-- Step 4: Create policies for role_permissions
+CREATE POLICY "Super Admin and Admin can manage role permissions" 
+ON public.role_permissions FOR ALL 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() 
+        AND (profiles.role = 'super_admin' OR profiles.role = 'admin')
+    )
+);
+
+CREATE POLICY "All users can view role permissions" 
+ON public.role_permissions FOR SELECT 
+USING (true);
+
+-- Step 5: Insert default permissions for each role
+INSERT INTO public.role_permissions (role_name, permissions) VALUES
+('super_admin', '{
+    "user_management": true,
+    "vendor_management": true,
+    "marketplace_management": true,
+    "support_management": true,
+    "analytics_access": true,
+    "content_management": true,
+    "settings_access": true,
+    "role_assignment": true,
+    "order_management": true,
+    "all_access": true
+}'),
+('admin', '{
+    "user_management": true,
+    "vendor_management": true,
+    "marketplace_management": true,
+    "support_management": true,
+    "analytics_access": true,
+    "content_management": true,
+    "settings_access": true,
+    "role_assignment": true,
+    "order_management": true
+}'),
+('vendor_manager', '{
+    "vendor_management": true,
+    "analytics_access": {"vendor_analytics": true}
+}'),
+('marketplace_moderator', '{
+    "marketplace_management": true,
+    "analytics_access": {"marketplace_analytics": true}
+}'),
+('user_support_admin', '{
+    "support_management": true,
+    "user_management": {"view": true, "issue_resolution": true}
+}'),
+('analytics_manager', '{
+    "analytics_access": true,
+    "report_generation": true
+}'),
+('content_manager', '{
+    "content_management": true,
+    "announcements": true,
+    "terms_policies": true
+}'),
+('cashier', '{
+    "order_management": true,
+    "payment_processing": true
+}'),
+('vendor', '{
+    "vendor_profile": true,
+    "menu_management": true,
+    "order_processing": true,
+    "vendor_analytics": true
+}'),
+('student', '{
+    "profile_management": true,
+    "marketplace_access": true,
+    "order_placement": true
+}');
+
+-- Step 6: Create a function for Super Admin to assign roles
+CREATE OR REPLACE FUNCTION assign_user_role(user_id UUID, new_role TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER -- This bypasses RLS
+AS $$
+DECLARE
+  result JSONB;
+  admin_role TEXT;
+BEGIN
+  -- Check if the current user is a super_admin or admin
+  SELECT role INTO admin_role
+  FROM profiles
+  WHERE id = auth.uid();
+  
+  -- Validate that only super_admin or admin can assign roles
+  IF admin_role != 'super_admin' AND admin_role != 'admin' THEN
+    RETURN jsonb_build_object(
+        'success', false,
+        'message', 'Only super_admin or admin can assign roles'
+    );
+  END IF;
+  
+  -- Validate role input - must match our constraint
+  IF new_role NOT IN ('student', 'vendor', 'admin', 'super_admin', 'vendor_manager', 
+                     'marketplace_moderator', 'user_support_admin', 'analytics_manager', 
+                     'content_manager', 'cashier') THEN
+    RETURN jsonb_build_object(
+        'success', false,
+        'message', 'Invalid role specified'
+    );
+  END IF;
+  
+  -- Additional check: Only super_admin can create another super_admin
+  IF new_role = 'super_admin' AND admin_role != 'super_admin' THEN
+    RETURN jsonb_build_object(
+        'success', false,
+        'message', 'Only a super_admin can create another super_admin'
+    );
+  END IF;
+
+  -- Update the profile
+  UPDATE profiles
+  SET role = new_role,
+      updated_at = NOW()
+  WHERE id = user_id;
+  
+  -- Return the updated profile
+  SELECT jsonb_build_object(
+    'success', true,
+    'id', id,
+    'email', email,
+    'role', role,
+    'updated_at', updated_at
+  ) INTO result
+  FROM profiles
+  WHERE id = user_id;
+  
+  RETURN result;
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION assign_user_role(UUID, TEXT) TO authenticated;
+
+-- Step 7: Create an admin_activities log to track role changes
+CREATE TABLE public.admin_activities (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    admin_id UUID REFERENCES public.profiles NOT NULL,
+    action_type TEXT NOT NULL,
+    target_id UUID, -- Can be user ID, vendor ID, etc.
+    details JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.admin_activities ENABLE ROW LEVEL SECURITY;
+
+-- Add policy for admin_activities
+CREATE POLICY "Admin and Super Admin can view admin activities" 
+ON public.admin_activities FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() 
+        AND (profiles.role = 'super_admin' OR profiles.role = 'admin')
+    )
+);
+
+CREATE POLICY "Only the admin who performed the action can create activity log" 
+ON public.admin_activities FOR INSERT 
+TO authenticated
+WITH CHECK (admin_id = auth.uid());
+
+-- Step 8: Create a trigger to log role changes
+CREATE OR REPLACE FUNCTION log_role_change()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.role <> NEW.role THEN
+    INSERT INTO public.admin_activities (
+      admin_id,
+      action_type,
+      target_id,
+      details
+    ) VALUES (
+      auth.uid(),
+      'role_change',
+      NEW.id,
+      jsonb_build_object(
+        'previous_role', OLD.role,
+        'new_role', NEW.role,
+        'user_email', NEW.email
+      )
+    );
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER log_role_change_trigger
+AFTER UPDATE ON public.profiles
+FOR EACH ROW
+WHEN (OLD.role IS DISTINCT FROM NEW.role)
+EXECUTE FUNCTION log_role_change();
+
+-- Step 9: Update your existing admin to have super_admin powers (optional)
+-- If you want your existing admin to be a super_admin, uncomment this:
+-- UPDATE public.profiles 
+-- SET role = 'super_admin'
+-- WHERE email = 'admin@admin.com';
+-- Note: We're leaving this commented since you mentioned you want to keep the admin as it is
+
+-- Step 10: Create a support tickets system for the User Support Admin role
+CREATE TABLE public.support_tickets (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES public.profiles NOT NULL,
+    subject TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('new', 'in_progress', 'resolved', 'closed')),
+    priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    assigned_to UUID REFERENCES public.profiles,
+    related_order_id UUID REFERENCES public.food_orders,
+    related_item_id UUID REFERENCES public.marketplace_items,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Step 11: Create a table for ticket responses
+CREATE TABLE public.ticket_responses (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    ticket_id UUID REFERENCES public.support_tickets NOT NULL,
+    responder_id UUID REFERENCES public.profiles NOT NULL,
+    response TEXT NOT NULL,
+    is_internal BOOLEAN DEFAULT false, -- true if it's a note only for admins
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.support_tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ticket_responses ENABLE ROW LEVEL SECURITY;
+
+-- Add policies for support tickets
+CREATE POLICY "Users can view their own tickets" 
+ON public.support_tickets FOR SELECT 
+TO authenticated
+USING (user_id = auth.uid());
+
+CREATE POLICY "Users can create tickets" 
+ON public.support_tickets FOR INSERT 
+TO authenticated
+WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Support staff can view all tickets" 
+ON public.support_tickets FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() 
+        AND profiles.role IN ('super_admin', 'admin', 'user_support_admin')
+    )
+);
+
+CREATE POLICY "Support staff can update tickets" 
+ON public.support_tickets FOR UPDATE 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() 
+        AND profiles.role IN ('super_admin', 'admin', 'user_support_admin')
+    )
+);
+
+-- Add policies for ticket responses
+CREATE POLICY "Users can view responses to their tickets" 
+ON public.ticket_responses FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.support_tickets 
+        WHERE support_tickets.id = ticket_id AND support_tickets.user_id = auth.uid()
+        AND is_internal = false
+    )
+);
+
+CREATE POLICY "Users can add responses to their tickets" 
+ON public.ticket_responses FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.support_tickets 
+        WHERE support_tickets.id = ticket_id AND support_tickets.user_id = auth.uid()
+    ) AND is_internal = false
+);
+
+CREATE POLICY "Support staff can view all responses" 
+ON public.ticket_responses FOR SELECT 
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() 
+        AND profiles.role IN ('super_admin', 'admin', 'user_support_admin')
+    )
+);
+
+CREATE POLICY "Support staff can add responses" 
+ON public.ticket_responses FOR INSERT 
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE profiles.id = auth.uid() 
+        AND profiles.role IN ('super_admin', 'admin', 'user_support_admin')
+    )
+);
+
+-- Step 12: Create a function to determine role capabilities (used in frontend)
+CREATE OR REPLACE FUNCTION get_user_permissions(user_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  user_role TEXT;
+  permissions_data JSONB;
+BEGIN
+  -- Get the user's role
+  SELECT role INTO user_role
+  FROM profiles
+  WHERE id = user_id;
+  
+  -- Get the permissions for that role
+  SELECT permissions INTO permissions_data
+  FROM role_permissions
+  WHERE role_name = user_role;
+  
+  RETURN jsonb_build_object(
+    'role', user_role,
+    'permissions', permissions_data
+  );
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION get_user_permissions(UUID) TO authenticated;
+
+-- Add this function to allow super_admin to create vendor users directly
+CREATE OR REPLACE FUNCTION admin_create_vendor(
+  email TEXT,
+  password TEXT,
+  business_name TEXT,
+  business_description TEXT,
+  college_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  new_user_id UUID;
+  result JSONB;
+  admin_role TEXT;
+BEGIN
+  -- Check if the current user is a super_admin, admin, or vendor_manager
+  SELECT role INTO admin_role
+  FROM profiles
+  WHERE id = auth.uid();
+  
+  IF admin_role NOT IN ('super_admin', 'admin', 'vendor_manager') THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'message', 'Only super_admin, admin, or vendor_manager can create vendor accounts'
+    );
+  END IF;
+  
+  -- Create the user in auth.users
+  INSERT INTO auth.users (
+    email,
+    email_confirmed_at,
+    encrypted_password,
+    raw_user_meta_data,
+    created_at,
+    updated_at
+  ) VALUES (
+    email,
+    now(), -- Auto-confirm the email
+    crypt(password, gen_salt('bf')), -- Encrypt the password
+    jsonb_build_object(
+      'business_name', business_name,
+      'role', 'vendor'
+    ),
+    now(),
+    now()
+  )
+  RETURNING id INTO new_user_id;
+  
+  -- Create the profile
+  INSERT INTO profiles (
+    id,
+    email,
+    role,
+    business_name,
+    business_description,
+    college_id,
+    is_approved
+  ) VALUES (
+    new_user_id,
+    email,
+    'vendor',
+    business_name,
+    business_description,
+    college_id,
+    true -- Auto-approve vendors created by admins
+  );
+  
+  -- Create vendor record in food_vendors
+  INSERT INTO food_vendors (
+    profile_id,
+    vendor_name,
+    description,
+    location,
+    college_id,
+    is_active
+  ) VALUES (
+    new_user_id,
+    business_name,
+    business_description,
+    'To be updated', -- Default location
+    college_id,
+    true
+  );
+  
+  -- Log the activity
+  INSERT INTO admin_activities (
+    admin_id,
+    action_type,
+    target_id,
+    details
+  ) VALUES (
+    auth.uid(),
+    'vendor_creation',
+    new_user_id,
+    jsonb_build_object(
+      'business_name', business_name,
+      'email', email
+    )
+  );
+  
+  RETURN jsonb_build_object(
+    'success', true,
+    'user_id', new_user_id,
+    'email', email,
+    'business_name', business_name
+  );
+  
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object(
+    'success', false,
+    'message', SQLERRM
+  );
+END;
+$$;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION admin_create_vendor(TEXT, TEXT, TEXT, TEXT, UUID) TO authenticated;

@@ -55,7 +55,7 @@ export default function CollegesPage() {
 
   useEffect(() => {
     const fetchColleges = async () => {
-      if (profile?.role !== 'admin') {
+      if (profile?.role !== 'admin'&& profile?.role !== 'super_admin') {
         setError('Only administrators can access this page');
         return;
       }
@@ -265,7 +265,7 @@ export default function CollegesPage() {
     return <div className="text-black">Loading...</div>;
   }
 
-  if (profile?.role !== 'admin') {
+  if (profile?.role !== 'admin'&& profile?.role !== 'super_admin') {
     return (
       <div className="p-4">
         <h1 className="text-xl font-bold text-black">Access Denied</h1>

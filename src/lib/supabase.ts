@@ -14,7 +14,7 @@ export type Profile = {
   last_name: string | null;
   phone_number: string | null;
   profile_image_url: string | null;
-  role: 'student' | 'vendor' | 'admin';
+  role: 'student' | 'vendor' | 'admin' | 'super_admin' | 'vendor_manager' | 'marketplace_moderator' | 'user_support_admin' | 'analytics_manager' | 'content_manager' | 'cashier';
   college_id: string | null;
   created_at: string;
   updated_at: string;
@@ -126,3 +126,36 @@ export type MarketplaceTransaction = {
   created_at: string;
   updated_at: string;
 };
+
+// New types for role-based permissions system
+export type RoleName = Profile['role'];
+
+export type RolePermission = {
+  id: string;
+  role_name: RoleName;
+  permissions: {
+    user_management?: boolean | { view?: boolean, issue_resolution?: boolean };
+    vendor_management?: boolean;
+    marketplace_management?: boolean;
+    support_management?: boolean;
+    analytics_access?: boolean | { vendor_analytics?: boolean, marketplace_analytics?: boolean };
+    content_management?: boolean;
+    settings_access?: boolean;
+    role_assignment?: boolean;
+    order_management?: boolean;
+    payment_processing?: boolean;
+    all_access?: boolean;
+    vendor_profile?: boolean;
+    menu_management?: boolean;
+    order_processing?: boolean;
+    vendor_analytics?: boolean;
+    profile_management?: boolean;
+    marketplace_access?: boolean;
+    order_placement?: boolean;
+    report_generation?: boolean;
+    announcements?: boolean;
+    terms_policies?: boolean;
+  };
+  created_at: string;
+  updated_at: string;
+}

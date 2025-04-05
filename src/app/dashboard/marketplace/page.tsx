@@ -83,11 +83,12 @@ export default function MarketplacePage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (profile?.role !== 'admin') {
-        setError('Only administrators can access this page');
+      // Allow access if the user is either admin or marketplace_moderator
+      if (profile?.role !== 'admin' && profile?.role !== 'marketplace_moderator' && profile?.role !== 'super_admin') {
+        setError('Only administrators, marketplace moderators, and super admins can access this page');
         return;
       }
-
+  
       try {
         // Fetch marketplace items with relations
         const { data: itemsData, error: itemsError } = await supabase
@@ -146,11 +147,12 @@ export default function MarketplacePage() {
         console.error(err);
       }
     };
-
+  
     if (profile) {
       fetchData();
     }
   }, [profile]);
+  
 
   const handleRemoveItem = async (itemId: string) => {
     if (!confirm('Are you sure you want to remove this item from the marketplace?')) {
@@ -272,14 +274,15 @@ export default function MarketplacePage() {
     return <div className="p-4 text-black">Loading...</div>;
   }
 
-  if (profile?.role !== 'admin') {
-    return (
-      <div className="p-4">
-        <h1 className="text-xl font-bold text-black">Access Denied</h1>
-        <p className="text-black">Only administrators can access this page.</p>
-      </div>
-    );
-  }
+// Replace this condition
+if (profile?.role !== 'admin' && profile?.role !== 'marketplace_moderator' && profile?.role !== 'super_admin') {
+  return (
+    <div className="p-4">
+      <h1 className="text-xl font-bold text-black">Access Denied</h1>
+      <p className="text-black">Only administrators and marketplace moderators can access this page.</p>
+    </div>
+  );
+}
 
   return (
     <div className="space-y-4 sm:space-y-6 px-2 sm:px-4 pb-6 text-black">

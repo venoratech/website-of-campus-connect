@@ -1,4 +1,4 @@
-// app/dashboard/layout.tsx - Updated MobileSidebar component
+// app/dashboard/layout.tsx - Updated with Cashier Management
 'use client';
 import { ReactNode, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -32,6 +32,8 @@ import {
   Clock,
   Megaphone,
   FileText,
+  CreditCard,
+  UserCog
 } from 'lucide-react';
 
 interface SidebarItemProps {
@@ -111,24 +113,73 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       { icon: Gift, title: 'Promotions', href: '/dashboard/promotions' },
       { icon: MessageSquare, title: 'Messages', href: '/dashboard/messages' },
       { icon: Clock, title: 'Order Management', href: '/dashboard/orders' },
+      { icon: UserCog, title: 'Cashier Management', href: '/dashboard/admin/cashiers' }, // New item for vendors
     ];
 
     const adminItems = [
       { icon: Users, title: 'User Management', href: '/dashboard/users' },
       { icon: Building, title: 'Colleges', href: '/dashboard/colleges' },
       { icon: Store, title: 'Vendors', href: '/dashboard/vendors' },
+      { icon: UserCog, title: 'Cashier Management', href: '/dashboard/admin/cashiers' }, // New item for admins
       { icon: ShoppingBag, title: 'Marketplace', href: '/dashboard/marketplace' },
       { icon: Megaphone, title: 'Announcements', href: '/dashboard/announcements' },
-      { icon: FileText, title: 'Terms & Conditions', href: '/dashboard/terms' }, // Add this line
+      { icon: FileText, title: 'Terms & Conditions', href: '/dashboard/terms' },
       { icon: BarChart, title: 'Analytics', href: '/dashboard/analytics' },
       { icon: Settings, title: 'Settings', href: '/dashboard/settings' },
     ];
 
+    // Cashier navigation items
+    const cashierItems = [
+      { icon: Clock, title: 'Order Management', href: '/dashboard/orders' },
+    ];
+
+    // Vendor Manager navigation items
+    const vendorManagerItems = [
+      { icon: Store, title: 'Vendors', href: '/dashboard/vendors' },
+      { icon: UserCog, title: 'Cashier Management', href: '/dashboard/admin/cashiers' }, // New item for vendor managers
+    ];
+
+    // Marketplace Moderator navigation items
+    const marketplaceModeratorItems = [
+      { icon: ShoppingBag, title: 'Marketplace', href: '/dashboard/marketplace' },
+    ];
+
+    // User Support Admin navigation items
+    const userSupportItems = [
+      { icon: MessageSquare, title: 'Support Tickets', href: '/dashboard/support/tickets' },
+      { icon: Users, title: 'User Disputes', href: '/dashboard/support/disputes' },
+      { icon: CreditCard, title: 'Refunds', href: '/dashboard/support/refunds' },
+    ];
+
+    // Analytics Manager navigation items
+    const analyticsManagerItems = [
+      { icon: BarChart, title: 'Analytics', href: '/dashboard/analytics' },
+    ];
+
+    // Content Manager navigation items
+    const contentManagerItems = [
+      { icon: Megaphone, title: 'Announcements', href: '/dashboard/announcements' },
+      { icon: FileText, title: 'Terms & Conditions', href: '/dashboard/terms' },
+    ];
+
     switch (profile.role) {
+      case 'super_admin':
       case 'admin':
         return [...commonItems, ...adminItems];
       case 'vendor':
         return [...commonItems, ...vendorItems];
+      case 'cashier':
+        return [...commonItems, ...cashierItems];
+      case 'vendor_manager':
+        return [...commonItems, ...vendorManagerItems];
+      case 'marketplace_moderator':
+        return [...commonItems, ...marketplaceModeratorItems];
+      case 'user_support_admin':
+        return [...commonItems, ...userSupportItems];
+      case 'analytics_manager':
+        return [...commonItems, ...analyticsManagerItems];
+      case 'content_manager':
+        return [...commonItems, ...contentManagerItems];
       default:
         return commonItems;
     }

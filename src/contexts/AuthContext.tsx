@@ -5,13 +5,26 @@ import { Session, User, AuthError } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { supabase, Profile } from '@/lib/supabase';
 
+// Define a type for user data
+interface UserData {
+  first_name?: string;
+  last_name?: string;
+  phone_number?: string;
+  [key: string]: string | undefined;
+}
+
 type AuthContextType = {
   user: User | null;
   profile: Profile | null;
   session: Session | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
-  signUp: (email: string, password: string, role: 'student' | 'vendor' | 'admin') => Promise<{ error: AuthError | Error | null }>;
+  signUp: (
+    email: string, 
+    password: string, 
+    role: 'student' | 'vendor' | 'cashier' | 'admin',
+    userData?: UserData
+  ) => Promise<{ error: AuthError | Error | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -143,24 +156,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   };
 
-  const signUp = async (email: string, password: string, role: 'student' | 'vendor' | 'admin') => {
+  const signUp = async (
+    email: string, 
+    password: string, 
+    role: 'student' | 'vendor' | 'cashier' | 'admin',
+    userData?: UserData
+  ) => {
     try {
       console.log('Signing up with role:', role);
+      
       // Store intended role in localStorage before signup
       localStorage.setItem('intended_role', role);
+      
+      // Prepare user metadata
+      const metadata = {
+        role: role,
+        intended_role: role,
+        // Default empty values if not provided
+        first_name: '',
+        last_name: '',
+        phone_number: '',
+        ...userData // Override with any provided userData
+      };
+      
+      console.log('Signup metadata:', metadata);
       
       // Sign up the user
       const { data, error } = await supabase.auth.signUp({ 
         email, 
         password,
         options: {
-          data: { 
-            role: role,
-            // Adding these explicitly for clarity
-            first_name: '',
-            last_name: '',
-            intended_role: role
-          }
+          data: metadata
         }
       });
       
@@ -170,7 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error };
       }
       
-      // Try multiple approaches to update the role
+      // Try multiple approaches to update the role and additional data
       if (data?.user) {
         console.log('User created:', data.user.id);
         
@@ -178,50 +204,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Wait briefly for the trigger to create the profile
           await new Promise(resolve => setTimeout(resolve, 1000));
           
-          // Attempt #1: Direct update
-          const { error: updateError } = await supabase
-            .from('profiles')
-            .update({ role })
-            .eq('id', data.user.id);
-            
-          if (updateError) {
-            console.log('Direct update failed:', updateError);
-          } else {
-            console.log('Direct update succeeded');
-          }
+          // Attempt #1: Upsert approach with all user data
+          const profileData = {
+            id: data.user.id,
+            email,
+            role,
+            ...userData // Include additional fields like name and phone for cashiers
+          };
           
-          // Attempt #2: Upsert approach
+          console.log('Upserting profile with data:', profileData);
+          
           const { error: upsertError } = await supabase
             .from('profiles')
-            .upsert({
-              id: data.user.id,
-              email,
-              role
-            }, {
+            .upsert(profileData, {
               onConflict: 'id',
               ignoreDuplicates: false
             });
             
           if (upsertError) {
             console.log('Upsert approach failed:', upsertError);
+            
+            // Attempt #2: Direct update as fallback
+            const { error: updateError } = await supabase
+              .from('profiles')
+              .update(profileData)
+              .eq('id', data.user.id);
+              
+            if (updateError) {
+              console.log('Direct update failed:', updateError);
+            } else {
+              console.log('Direct update succeeded');
+            }
           } else {
             console.log('Upsert succeeded');
           }
           
           // Attempt #3: Try RPC function if available
-          try {
-            const { error: rpcError } = await supabase.rpc('update_user_role', {
-              user_id: data.user.id,
-              new_role: role
-            });
-            
-            if (rpcError) {
-              console.log('RPC approach failed:', rpcError);
-            } else {
-              console.log('RPC update succeeded');
+          if (role === 'cashier' || role === 'vendor') {
+            try {
+              const { error: rpcError } = await supabase.rpc('update_user_role', {
+                user_id: data.user.id,
+                new_role: role
+              });
+              
+              if (rpcError) {
+                console.log('RPC approach failed:', rpcError);
+              } else {
+                console.log('RPC update succeeded');
+              }
+            } catch (rpcErr) {
+              console.log('RPC call error:', rpcErr);
             }
-          } catch (rpcErr) {
-            console.log('RPC call error:', rpcErr);
           }
           
         } catch (err) {

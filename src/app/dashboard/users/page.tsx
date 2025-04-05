@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase, Profile } from '@/lib/supabase';
+import { supabase, Profile, RolePermission } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,7 +25,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { formatDate } from '@/lib/utils';
-import { Eye, Edit, User, UserX, CheckSquare } from 'lucide-react';
+import { Eye, Edit, User, UserX, CheckSquare, ShieldCheck, Shield } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Image from 'next/image';
 
@@ -44,14 +44,41 @@ export default function UsersPage() {
   // Edit form state
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
-  const [editRole, setEditRole] = useState<'student' | 'vendor' | 'admin'>('student');
+  const [editRole, setEditRole] = useState<Profile['role']>('student');
   const [editIsApproved, setEditIsApproved] = useState(false);
   const [editIsIdVerified, setEditIsIdVerified] = useState(false);
 
+  // State for permissions dialog
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
+  const [selectedRolePermissions, setSelectedRolePermissions] = useState<RolePermission | null>(null);
+
+  // State for role management dialog
+  const [roleManagementOpen, setRoleManagementOpen] = useState(false);
+  const [allRolePermissions, setAllRolePermissions] = useState<RolePermission[]>([]);
+  const [isLoadingRoles, setIsLoadingRoles] = useState(true);
+  
+  // State for custom role creation
+  const [createRoleDialogOpen, setCreateRoleDialogOpen] = useState(false);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRolePermissions, setNewRolePermissions] = useState<Record<string, boolean>>({
+    user_management: false,
+    vendor_management: false,
+    marketplace_management: false,
+    support_management: false,
+    analytics_access: false,
+    content_management: false,
+    settings_access: false,
+    role_assignment: false,
+    order_management: false,
+    payment_processing: false
+  });
+
   useEffect(() => {
     const fetchUsers = async () => {
-      if (!profile || profile.role !== 'admin') {
-        setError('Only administrators can access this page');
+      // Check for admin or super_admin privileges
+      if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin' && 
+          profile.role !== 'vendor_manager' && profile.role !== 'user_support_admin')) {
+        setError('You do not have sufficient permissions to access this page');
         return;
       }
 
@@ -91,7 +118,7 @@ export default function UsersPage() {
 
   // New function to verify all student IDs
   const handleVerifyAllIds = async () => {
-    if (profile?.role !== 'admin') return;
+    if (!canEditUsers) return;
     
     // Confirm with the admin before proceeding
     if (!confirm('Are you sure you want to verify all student IDs with uploaded images? This will mark all unverified student IDs as verified.')) return;
@@ -159,7 +186,14 @@ export default function UsersPage() {
   };
 
   const handleSaveUser = async () => {
-    if (!selectedUser || profile?.role !== 'admin') return;
+    if (!selectedUser || !canEditUsers) return;
+    
+    // Only super_admin can create or modify another super_admin
+    if (editRole === 'super_admin' && profile?.role !== 'super_admin') {
+      setError('Only a super admin can assign the super admin role');
+      return;
+    }
+    
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -238,7 +272,8 @@ export default function UsersPage() {
   };
 
   const handleUpdateVerificationStatus = async (userId: string, isVerified: boolean) => {
-    if (profile?.role !== 'admin') return;
+    if (!canEditUsers) return;
+    
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -287,7 +322,15 @@ export default function UsersPage() {
   };
 
   const handleDeactivateUser = async (userId: string) => {
-    if (profile?.role !== 'admin') return;
+    if (!canEditUsers) return;
+    
+    // Prevent deactivating super_admin if not a super_admin
+    const targetUser = users.find(u => u.id === userId);
+    if (targetUser?.role === 'super_admin' && profile?.role !== 'super_admin') {
+      setError('Only a super admin can deactivate another super admin');
+      return;
+    }
+    
     if (!confirm('Are you sure you want to deactivate this user? They will no longer be able to log in.')) return;
 
     setIsSubmitting(true);
@@ -340,8 +383,19 @@ export default function UsersPage() {
   const usersByRole = {
     student: users.filter(u => u.role === 'student').length,
     vendor: users.filter(u => u.role === 'vendor').length,
-    admin: users.filter(u => u.role === 'admin').length,
-    pendingVendors: users.filter(u => u.role === 'vendor' && !u.is_approved).length
+    admin: users.filter(u => ['admin', 'super_admin', 'vendor_manager', 'marketplace_moderator', 
+              'user_support_admin', 'analytics_manager', 'content_manager', 'cashier'].includes(u.role)).length,
+    pendingVendors: users.filter(u => u.role === 'vendor' && !u.is_approved).length,
+    adminCount: {
+      admin: users.filter(u => u.role === 'admin').length,
+      superAdmin: users.filter(u => u.role === 'super_admin').length,
+      vendorManager: users.filter(u => u.role === 'vendor_manager').length,
+      marketplaceModerator: users.filter(u => u.role === 'marketplace_moderator').length,
+      userSupport: users.filter(u => u.role === 'user_support_admin').length,
+      analytics: users.filter(u => u.role === 'analytics_manager').length,
+      content: users.filter(u => u.role === 'content_manager').length,
+      cashier: users.filter(u => u.role === 'cashier').length,
+    }
   };
 
   // Calculate the count of students with IDs uploaded but not verified yet
@@ -353,14 +407,141 @@ export default function UsersPage() {
     return <div className="text-black p-4">Loading...</div>;
   }
 
-  if (!profile || profile.role !== 'admin') {
+  // Check if user has appropriate permissions to access this page
+  const canAccessUserManagement = profile && (
+    profile.role === 'super_admin' || 
+    profile.role === 'admin' || 
+    profile.role === 'vendor_manager' || 
+    profile.role === 'user_support_admin'
+  );
+
+  // Determine if the user can edit other users
+  const canEditUsers = profile && (
+    profile.role === 'super_admin' || 
+    profile.role === 'admin'
+  );
+
+  if (!canAccessUserManagement) {
     return (
       <div className="p-4">
         <h1 className="text-xl font-bold text-black">Access Denied</h1>
-        <p className="text-black">Only administrators can access this page.</p>
+        <p className="text-black">You do not have permission to access this page.</p>
       </div>
     );
   }
+
+  // Add a helper function to get role display name from slug
+  const getRoleDisplayName = (role: string): string => {
+    switch (role) {
+      case 'super_admin': return 'Super Admin';
+      case 'vendor_manager': return 'Vendor Manager';
+      case 'marketplace_moderator': return 'Marketplace Moderator';
+      case 'user_support_admin': return 'User Support';
+      case 'analytics_manager': return 'Analytics Manager';
+      case 'content_manager': return 'Content Manager';
+      case 'cashier': return 'Cashier';
+      default: return role.charAt(0).toUpperCase() + role.slice(1);
+    }
+  };
+
+  // Helper for role badge styling
+  const getRoleBadgeStyles = (role: string): string => {
+    switch (role) {
+      case 'admin': return 'border-purple-400 bg-purple-50 text-purple-700 border';
+      case 'super_admin': return 'border-indigo-400 bg-indigo-50 text-indigo-700 border';
+      case 'vendor_manager': return 'border-emerald-400 bg-emerald-50 text-emerald-700 border';
+      case 'marketplace_moderator': return 'border-sky-400 bg-sky-50 text-sky-700 border';
+      case 'user_support_admin': return 'border-rose-400 bg-rose-50 text-rose-700 border';
+      case 'analytics_manager': return 'border-amber-400 bg-amber-50 text-amber-700 border';
+      case 'content_manager': return 'border-teal-400 bg-teal-50 text-teal-700 border';
+      case 'cashier': return 'border-orange-400 bg-orange-50 text-orange-700 border';
+      case 'vendor': return 'border-green-400 bg-green-50 text-green-700 border';
+      default: return 'border-blue-400 bg-blue-50 text-blue-700 border'; // student and others
+    }
+  };
+
+  // Function to fetch role permissions
+  const fetchRolePermissions = async (roleName: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('role_permissions')
+        .select('*')
+        .eq('role_name', roleName)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching role permissions:', error);
+        return null;
+      }
+      
+      return data;
+    } catch (err) {
+      console.error('Error in fetchRolePermissions:', err);
+      return null;
+    }
+  };
+
+  // Handler to view role permissions
+  const handleViewPermissions = async (roleName: string) => {
+    const permissions = await fetchRolePermissions(roleName);
+    setSelectedRolePermissions(permissions);
+    setPermissionsDialogOpen(true);
+  };
+
+  // Add role descriptions for the permissions dialog
+  const getRoleDescription = (role: string): string => {
+    switch (role) {
+      case 'super_admin':
+        return 'Full access to everything including user management, vendors, marketplace, settings. Can assign and remove admin roles.';
+      case 'admin':
+        return 'Administrative access to most system functions, but with some restrictions compared to Super Admin.';
+      case 'vendor_manager':
+        return 'Manages vendor approvals and onboarding. Updates vendor details and resolves vendor issues.';
+      case 'marketplace_moderator':
+        return 'Monitors listings to ensure quality and compliance. Approves or removes products/services.';
+      case 'user_support_admin':
+        return 'Handles user complaints and support tickets. Manages refunds, order disputes, or account issues.';
+      case 'analytics_manager':
+        return 'Tracks key metrics like vendor activity, sales, and user engagement. Provides reports to help improve the platform.';
+      case 'content_manager':
+        return 'Manages platform-wide announcements. Updates terms, policies, or notifications.';
+      case 'cashier':
+        return 'Processes customer payments and handles transactions. Accepts or rejects incoming orders and updates order status.';
+      case 'vendor':
+        return 'Can manage their own vendor profile, menu items, and process orders from their customers.';
+      case 'student':
+        return 'Regular user account with access to browse marketplace, place orders, and manage their profile.';
+      default:
+        return 'Standard account with basic permissions.';
+    }
+  };
+
+  // Function to fetch all roles and their permissions
+  const fetchAllRolePermissions = async () => {
+    setIsLoadingRoles(true);
+    try {
+      const { data, error } = await supabase
+        .from('role_permissions')
+        .select('*')
+        .order('role_name');
+      
+      if (error) {
+        console.error('Error fetching role permissions:', error);
+        return;
+      }
+      
+      setAllRolePermissions(data || []);
+    } catch (err) {
+      console.error('Error in fetchAllRolePermissions:', err);
+    } finally {
+      setIsLoadingRoles(false);
+    }
+  };
+
+  const handleOpenRoleManagement = () => {
+    fetchAllRolePermissions();
+    setRoleManagementOpen(true);
+  };
 
   return (
     <div className="space-y-6 px-2 sm:px-4 pb-6">
@@ -370,6 +551,21 @@ export default function UsersPage() {
           Manage users, roles, and permissions
         </p>
       </div>
+
+      {/* Admin action buttons */}
+      {(profile?.role === 'super_admin' || profile?.role === 'admin') && (
+        <div className="flex flex-wrap gap-2">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleOpenRoleManagement}
+            className="bg-white text-indigo-700 border-indigo-300 hover:bg-indigo-50"
+          >
+            <Shield className="h-4 w-4 mr-2" />
+            Manage Roles & Permissions
+          </Button>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 p-3 rounded-md border border-red-300">
@@ -439,7 +635,14 @@ export default function UsersPage() {
                 <SelectItem value="all" className="text-black">All Roles</SelectItem>
                 <SelectItem value="student" className="text-black">Students</SelectItem>
                 <SelectItem value="vendor" className="text-black">Vendors</SelectItem>
-                <SelectItem value="admin" className="text-black">Administrators</SelectItem>
+                <SelectItem value="admin" className="text-black">Admin</SelectItem>
+                <SelectItem value="super_admin" className="text-black">Super Admin</SelectItem>
+                <SelectItem value="vendor_manager" className="text-black">Vendor Manager</SelectItem>
+                <SelectItem value="marketplace_moderator" className="text-black">Marketplace Moderator</SelectItem>
+                <SelectItem value="user_support_admin" className="text-black">User Support</SelectItem>
+                <SelectItem value="analytics_manager" className="text-black">Analytics Manager</SelectItem>
+                <SelectItem value="content_manager" className="text-black">Content Manager</SelectItem>
+                <SelectItem value="cashier" className="text-black">Cashier</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -495,29 +698,25 @@ export default function UsersPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeactivateUser(user.id)}
-                          disabled={user.is_active === false}
-                          className="h-8 w-8 text-black hover:bg-gray-100"
-                        >
-                          <UserX className="h-4 w-4" />
-                        </Button>
+                        {canEditUsers && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeactivateUser(user.id)}
+                            disabled={user.is_active === false || (user.role === 'super_admin' && profile?.role !== 'super_admin')}
+                            className="h-8 w-8 text-black hover:bg-gray-100"
+                          >
+                            <UserX className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                     
                     <div className="mt-2 space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="text-xs text-black">Role:</span>
-                        <Badge className={
-                          user.role === 'admin'
-                            ? 'border-purple-400 bg-purple-50 text-purple-700 border text-xs'
-                            : user.role === 'vendor'
-                            ? 'border-green-400 bg-green-50 text-green-700 border text-xs'
-                            : 'border-blue-400 bg-blue-50 text-blue-700 border text-xs'
-                        }>
-                          {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                        <Badge className={`${getRoleBadgeStyles(user.role)} text-xs`}>
+                          {getRoleDisplayName(user.role)}
                         </Badge>
                       </div>
                       
@@ -605,14 +804,8 @@ export default function UsersPage() {
                           </TableCell>
                           <TableCell className="text-black">{user.email}</TableCell>
                           <TableCell>
-                            <Badge className={
-                              user.role === 'admin'
-                                ? 'border-purple-400 bg-purple-50 text-purple-700 border'
-                                : user.role === 'vendor'
-                                ? 'border-green-400 bg-green-50 text-green-700 border'
-                                : 'border-blue-400 bg-blue-50 text-blue-700 border'
-                            }>
-                              {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                            <Badge className={getRoleBadgeStyles(user.role)}>
+                              {getRoleDisplayName(user.role)}
                             </Badge>
                           </TableCell>
                           <TableCell>
@@ -661,15 +854,17 @@ export default function UsersPage() {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeactivateUser(user.id)}
-                              disabled={user.is_active === false}
-                              className="text-black hover:bg-gray-100"
-                            >
-                              <UserX className="h-4 w-4" />
-                            </Button>
+                            {canEditUsers && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeactivateUser(user.id)}
+                                disabled={user.is_active === false || (user.role === 'super_admin' && profile?.role !== 'super_admin')}
+                                className="text-black hover:bg-gray-100"
+                              >
+                                <UserX className="h-4 w-4" />
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))
@@ -727,14 +922,35 @@ export default function UsersPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-black">Role</label>
-                      <Select value={editRole} onValueChange={(value) => setEditRole(value as 'student' | 'vendor' | 'admin')}>
+                      <Select 
+                        value={editRole} 
+                        onValueChange={(value) => setEditRole(value as Profile['role'])}
+                        disabled={!canEditUsers || (profile?.role !== 'super_admin' && selectedUser?.role === 'super_admin')}
+                      >
                         <SelectTrigger className="bg-white text-black border-gray-300">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="bg-white text-black">
                           <SelectItem value="student" className="text-black">Student</SelectItem>
                           <SelectItem value="vendor" className="text-black">Vendor</SelectItem>
-                          <SelectItem value="admin" className="text-black">Admin</SelectItem>
+                          
+                          {/* Only super_admin and admin can assign admin roles */}
+                          {(profile?.role === 'super_admin' || profile?.role === 'admin') && (
+                            <>
+                              <SelectItem value="admin" className="text-black">Admin</SelectItem>
+                              <SelectItem value="vendor_manager" className="text-black">Vendor Manager</SelectItem>
+                              <SelectItem value="marketplace_moderator" className="text-black">Marketplace Moderator</SelectItem>
+                              <SelectItem value="user_support_admin" className="text-black">User Support Admin</SelectItem>
+                              <SelectItem value="analytics_manager" className="text-black">Analytics Manager</SelectItem>
+                              <SelectItem value="content_manager" className="text-black">Content Manager</SelectItem>
+                              <SelectItem value="cashier" className="text-black">Cashier</SelectItem>
+                            </>
+                          )}
+                          
+                          {/* Only super_admin can assign the super_admin role */}
+                          {profile?.role === 'super_admin' && (
+                            <SelectItem value="super_admin" className="text-black">Super Admin</SelectItem>
+                          )}
                         </SelectContent>
                       </Select>
                     </div>
@@ -794,18 +1010,20 @@ export default function UsersPage() {
 
                     <div>
                       <h3 className="text-sm font-medium text-black">Account Information</h3>
-                      <div className="text-black">
+                      <div className="text-black mb-2">
                         <span className="font-medium">Role:</span>{' '}
-                        <Badge className={
-                          selectedUser.role === 'admin'
-                            ? 'border-purple-400 bg-purple-50 text-purple-700 border'
-                            : selectedUser.role === 'vendor'
-                            ? 'border-green-400 bg-green-50 text-green-700 border'
-                            : 'border-blue-400 bg-blue-50 text-blue-700 border'
-                        }>
-                          {selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1)}
+                        <Badge className={getRoleBadgeStyles(selectedUser.role)}>
+                          {getRoleDisplayName(selectedUser.role)}
                         </Badge>
                       </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleViewPermissions(selectedUser.role)}
+                        className="text-black border-gray-300 hover:bg-gray-100"
+                      >
+                        View Role Permissions
+                      </Button>
                     </div>
 
                     {selectedUser.role !== 'vendor' && selectedUser.id_image_url && (
@@ -877,17 +1095,286 @@ export default function UsersPage() {
                     </Button>
                   </>
                 ) : (
-                  <Button
-                    onClick={handleEditUser}
-                    className="bg-black hover:bg-gray-800 text-white w-full sm:w-auto"
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Edit User
-                  </Button>
+                  canEditUsers && (
+                    <Button
+                      onClick={handleEditUser}
+                      className="bg-black hover:bg-gray-800 text-white w-full sm:w-auto"
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit User
+                    </Button>
+                  )
                 )}
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Role Permissions Dialog */}
+      <Dialog open={permissionsDialogOpen} onOpenChange={setPermissionsDialogOpen}>
+        <DialogContent className="sm:max-w-md max-w-[90%] bg-white text-black border-gray-300">
+          <DialogHeader>
+            <DialogTitle className="text-black">Role Permissions</DialogTitle>
+            <DialogDescription className="text-black">
+              Permissions for {selectedRolePermissions?.role_name ? getRoleDisplayName(selectedRolePermissions.role_name) : 'this role'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedRolePermissions ? (
+            <div className="space-y-4">
+              {selectedRolePermissions.role_name && (
+                <div className="bg-gray-50 p-3 rounded-md border border-gray-200">
+                  <p className="text-sm text-gray-700">{getRoleDescription(selectedRolePermissions.role_name)}</p>
+                </div>
+              )}
+              
+              <div className="border border-gray-200 rounded-md overflow-hidden">
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead className="text-black">Permission</TableHead>
+                      <TableHead className="text-black text-right">Access</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.entries(selectedRolePermissions.permissions).map(entry => (
+                      <TableRow key={entry[0]} className="border-gray-200">
+                        <TableCell className="font-medium text-black">
+                          {entry[0].split('_')
+                            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                            .join(' ')}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {typeof entry[1] === 'boolean' ? (
+                            <Badge className={entry[1] ? 'bg-green-50 text-green-700 border border-green-300' : 'bg-gray-50 text-gray-700 border border-gray-300'}>
+                              {entry[1] ? 'Yes' : 'No'}
+                            </Badge>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-blue-600 hover:text-blue-800 p-0 h-auto"
+                              onClick={() => alert(JSON.stringify(entry[1], null, 2))}
+                            >
+                              View Details
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              
+              <DialogFooter>
+                <Button
+                  onClick={() => setPermissionsDialogOpen(false)}
+                  className="bg-black hover:bg-gray-800 text-white w-full sm:w-auto"
+                >
+                  Close
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="py-4 text-center text-black">
+              Loading permissions...
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Role Management Dialog */}
+      <Dialog open={roleManagementOpen} onOpenChange={setRoleManagementOpen}>
+        <DialogContent className="max-w-4xl bg-white text-black border-gray-300">
+          <DialogHeader>
+            <DialogTitle className="text-black">Role Management</DialogTitle>
+            <DialogDescription className="text-black">
+              Manage and configure roles and their permissions
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoadingRoles ? (
+            <div className="py-8 text-center">
+              <p className="text-gray-500">Loading roles...</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium text-black">Available Roles</h3>
+                {profile?.role === 'super_admin' && (
+                  <Button 
+                    size="sm"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                    onClick={() => setCreateRoleDialogOpen(true)}
+                  >
+                    Create Custom Role
+                  </Button>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {allRolePermissions.map(roleData => (
+                  <Card key={roleData.role_name} className="border-gray-200">
+                    <CardHeader className="pb-2">
+                      <div className="flex justify-between items-center">
+                        <CardTitle className="text-sm font-medium">
+                          <Badge className={getRoleBadgeStyles(roleData.role_name)}>
+                            {getRoleDisplayName(roleData.role_name)}
+                          </Badge>
+                        </CardTitle>
+                        <div className="flex space-x-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => {
+                              setSelectedRolePermissions(roleData);
+                              setPermissionsDialogOpen(true);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          
+                          {profile?.role === 'super_admin' && roleData.role_name !== 'super_admin' && roleData.role_name !== 'admin' && (
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              className="h-8 w-8 p-0 text-indigo-600"
+                              onClick={() => {/* TODO: Implement edit role functionality */}}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">{getRoleDescription(roleData.role_name)}</p>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="text-xs space-y-1">
+                        {Object.entries(roleData.permissions)
+                          .filter(entry => entry[1] === true)
+                          .slice(0, 3)
+                          .map(entry => (
+                            <div key={entry[0]} className="flex items-center">
+                              <ShieldCheck className="h-3 w-3 mr-1 text-green-600" />
+                              <span>
+                                {entry[0].split('_')
+                                  .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                                  .join(' ')}
+                              </span>
+                            </div>
+                          ))}
+                        
+                        {Object.entries(roleData.permissions).filter(entry => entry[1] === true).length > 3 && (
+                          <div 
+                            className="text-blue-600 cursor-pointer" 
+                            onClick={() => {
+                              setSelectedRolePermissions(roleData);
+                              setPermissionsDialogOpen(true);
+                            }}
+                          >
+                            + {Object.entries(roleData.permissions).filter(entry => entry[1] === true).length - 3} more permissions
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded-md border border-gray-200">
+                <h4 className="text-sm font-medium text-black mb-2">About Admin Roles</h4>
+                <p className="text-xs text-gray-700 mb-3">
+                  Admin roles provide different levels of access to the system. Each role has specific permissions that determine what actions the user can perform.
+                </p>
+                <div className="space-y-1 text-xs text-gray-600">
+                  <p>• <strong>Super Admin</strong> - Full access to all system functions</p>
+                  <p>• <strong>Vendor Manager</strong> - Manages vendors and their approvals</p>
+                  <p>• <strong>Marketplace Moderator</strong> - Monitors product listings</p>
+                  <p>• <strong>User Support</strong> - Handles user tickets and issues</p>
+                  <p>• <strong>Analytics Manager</strong> - Access to reports and analytics</p>
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setRoleManagementOpen(false)}
+                  className="bg-white text-black border-gray-300"
+                >
+                  Close
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Role Dialog */}
+      <Dialog open={createRoleDialogOpen} onOpenChange={setCreateRoleDialogOpen}>
+        <DialogContent className="sm:max-w-lg bg-white text-black border-gray-300">
+          <DialogHeader>
+            <DialogTitle className="text-black">Create Custom Role</DialogTitle>
+            <DialogDescription className="text-black">
+              Define a new custom role with specific permissions
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-black">Role Name</label>
+              <Input
+                value={newRoleName}
+                onChange={(e) => setNewRoleName(e.target.value)}
+                placeholder="e.g. Finance Manager"
+                className="bg-white text-black border-gray-300"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-black">Permissions</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {Object.entries(newRolePermissions).map(([key, value]) => (
+                  <div key={key} className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id={`perm-${key}`}
+                      checked={value}
+                      onChange={(e) => setNewRolePermissions({
+                        ...newRolePermissions,
+                        [key]: e.target.checked
+                      })}
+                      className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                    />
+                    <label htmlFor={`perm-${key}`} className="text-sm text-black">
+                      {key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setCreateRoleDialogOpen(false)}
+              className="bg-white text-black border-gray-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                /* TODO: Implement role creation functionality */
+                alert('Create role functionality would go here');
+                setCreateRoleDialogOpen(false);
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              Create Role
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

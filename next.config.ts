@@ -5,7 +5,9 @@ const nextConfig: NextConfig = {
   images: {
     domains: [
       'res.cloudinary.com',
-      'oycsktwubyhwamssuohp.supabase.co'
+      'oycsktwubyhwamssuohp.supabase.co',
+      'placehold.co'  // Added this line
+
     ],
   },
 };
