@@ -102,7 +102,7 @@ export default function Dashboard() {
               .order('created_at', { ascending: false });
             ordersData = data || [];
           }
-        } else if (profile?.role === 'admin'|| profile?.role === 'super_admin') {
+        } else if (profile?.role === 'admin'|| profile?.role === 'super_admin'|| profile?.role === 'analytics_manager') {
           const { data } = await supabase
             .from('food_orders')
             .select('*')
@@ -176,7 +176,7 @@ export default function Dashboard() {
         <p className="text-black">
           Welcome back, {profile?.first_name || 'User'}!
         </p>
-        {(profile?.role === 'admin' || profile?.role==='super_admin') && (
+        {(profile?.role === 'admin' || profile?.role==='super_admin'|| profile?.role==='analytics_manager') && (
           <p className="text-black mt-2">Showing aggregated analytics for all vendors</p>
         )}
       </div>

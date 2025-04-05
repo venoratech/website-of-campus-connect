@@ -32,8 +32,8 @@ import {
   Clock,
   Megaphone,
   FileText,
-  CreditCard,
-  UserCog
+  UserCog,
+  ChartBar
 } from 'lucide-react';
 
 interface SidebarItemProps {
@@ -147,13 +147,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     // User Support Admin navigation items
     const userSupportItems = [
       { icon: MessageSquare, title: 'Support Tickets', href: '/dashboard/support/tickets' },
-      { icon: Users, title: 'User Disputes', href: '/dashboard/support/disputes' },
-      { icon: CreditCard, title: 'Refunds', href: '/dashboard/support/refunds' },
     ];
 
     // Analytics Manager navigation items
     const analyticsManagerItems = [
-      { icon: BarChart, title: 'Analytics', href: '/dashboard/analytics' },
+      { icon: BarChart, title: 'General Analytics', href: '/dashboard/analytics' },
+      {icon : ChartBar , title : 'Support Anlaytics', href: '/dashboard/support/analytics' }
+
     ];
 
     // Content Manager navigation items

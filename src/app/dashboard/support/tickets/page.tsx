@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { useState, useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -12,488 +12,922 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { formatDate } from '@/lib/utils';
-import { Eye, CheckCircle, XCircle, MessageSquare, Send } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { format, formatDistanceToNow } from "date-fns";
+import {
+  Search,
+  RefreshCw,
+  Filter,
+  Clock,
+  Check,
+  MessageSquare,
+  PlusCircle,
+  Eye,
+  UserCircle,
+} from "lucide-react";
 
-// Define interfaces
+// Types
 interface SupportTicket {
   id: string;
   user_id: string;
   subject: string;
   description: string;
-  status: 'open' | 'in_progress' | 'resolved' | 'closed';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: "new" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+  assigned_to: string | null;
+  related_order_id: string | null;
+  related_item_id: string | null;
   created_at: string;
   updated_at: string;
-  category: string;
-  resolved_by?: string;
-  user_name: string;
-  user_email: string;
+  user_profile?: UserProfile;
+  assigned_to_profile?: UserProfile;
+  responses_count?: number;
+  latest_response_at?: string;
 }
 
-interface TicketMessage {
+interface UserProfile {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  role: string;
+}
+
+interface TicketResponse {
   id: string;
   ticket_id: string;
-  user_id: string;
-  message: string;
+  responder_id: string;
+  response: string;
+  is_internal: boolean;
   created_at: string;
-  is_from_support: boolean;
-  user_name: string;
+  responder_profile?: UserProfile;
 }
 
-export default function SupportTicketsPage() {
+interface SupportStaff {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+}
+
+export default function SupportTicketsDashboard() {
   const { profile, isLoading } = useAuth();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
-  const [ticketMessages, setTicketMessages] = useState<TicketMessage[]>([]);
-  const [ticketDetailsOpen, setTicketDetailsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [newMessage, setNewMessage] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingTickets, setIsLoadingTickets] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilters, setActiveFilters] = useState({
+    status: "all",
+    priority: "all",
+    assignedTo: "all",
+  });
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(
+    null
+  );
+  const [ticketResponses, setTicketResponses] = useState<TicketResponse[]>([]);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isResponseModalOpen, setIsResponseModalOpen] = useState(false);
+  const [isNewTicketModalOpen, setIsNewTicketModalOpen] = useState(false);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [responseText, setResponseText] = useState("");
+  const [isInternalResponse, setIsInternalResponse] = useState(false);
+  const [supportStaff, setSupportStaff] = useState<SupportStaff[]>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Mock data for demo purposes
-  useEffect(() => {
-    if (!profile || (profile.role !== 'user_support_admin' && profile.role !== 'admin' && profile.role !== 'super_admin')) {
-      setError('You do not have sufficient permissions to access this page');
-      return;
+  // Fields for new ticket creation
+  const [newTicket, setNewTicket] = useState({
+    subject: "",
+    description: "",
+    priority: "medium",
+    related_order_id: null as string | null,
+    related_item_id: null as string | null,
+  });
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [totalTickets, setTotalTickets] = useState(0);
+
+  // Check if current user has permission to access tickets
+  const hasPermission =
+    profile?.role === "super_admin" ||
+    profile?.role === "admin" ||
+    profile?.role === "user_support_admin" ;
+  const fetchTickets = async (page = 1) => {
+    if (!profile?.id || !hasPermission) return;
+
+    setIsLoadingTickets(true);
+    setError(null);
+
+    try {
+      // Calculate range for pagination
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      // Get count of total tickets for pagination
+      const { count, error: countError } = await supabase
+        .from("support_tickets")
+        .select("id", { count: "exact" });
+
+      if (countError) throw countError;
+      setTotalTickets(count || 0);
+
+      // Get tickets with user profiles and response count
+      const { data: ticketsData, error: ticketsError } = await supabase
+        .from("support_tickets")
+        .select(
+          `
+          *,
+          user_profile:user_id(id, email, first_name, last_name, profile_image_url, role),
+          assigned_to_profile:assigned_to(id, email, first_name, last_name, profile_image_url, role),
+          responses_count:ticket_responses(count)
+        `
+        )
+        .order("updated_at", { ascending: false })
+        .range(from, to);
+
+      if (ticketsError) throw ticketsError;
+
+      // Get the latest response timestamp for each ticket
+      const ticketIds = ticketsData.map((ticket) => ticket.id);
+      const { data: latestResponses, error: responsesError } = await supabase
+        .from("ticket_responses")
+        .select("ticket_id, created_at")
+        .in("ticket_id", ticketIds)
+        .order("created_at", { ascending: false });
+
+      if (responsesError) throw responsesError;
+
+      // Create a map of ticket_id to latest response timestamp
+      const latestResponseMap: { [key: string]: string } = {};
+      latestResponses?.forEach((response) => {
+        if (!latestResponseMap[response.ticket_id]) {
+          latestResponseMap[response.ticket_id] = response.created_at;
+        }
+      });
+
+      // Format tickets with response count and latest response time
+      const formattedTickets = ticketsData.map((ticket) => ({
+        ...ticket,
+        responses_count: ticket.responses_count.length,
+        latest_response_at: latestResponseMap[ticket.id] || null,
+      }));
+
+      setTickets(formattedTickets);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error loading tickets");
+      console.error(err);
+    } finally {
+      setIsLoadingTickets(false);
     }
-
-    // Simulated tickets data
-    const mockTickets: SupportTicket[] = [
-      {
-        id: '1',
-        user_id: '101',
-        subject: 'Order not delivered',
-        description: 'I placed an order 2 hours ago but haven\'t received it yet. The vendor isn\'t responding.',
-        status: 'open',
-        priority: 'high',
-        created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-        category: 'order',
-        user_name: 'Alex Johnson',
-        user_email: 'alex@example.com'
-      },
-      {
-        id: '2',
-        user_id: '102',
-        subject: 'Refund request',
-        description: 'The food quality was poor. I would like a refund for my order #12345.',
-        status: 'in_progress',
-        priority: 'medium',
-        created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-        category: 'refund',
-        user_name: 'Samantha Lee',
-        user_email: 'sam@example.com'
-      },
-      {
-        id: '3',
-        user_id: '103',
-        subject: 'Account verification issue',
-        description: 'I uploaded my student ID but it\'s been 2 days and still not verified.',
-        status: 'open',
-        priority: 'medium',
-        created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-        category: 'account',
-        user_name: 'Jordan Smith',
-        user_email: 'jordan@example.com'
-      },
-      {
-        id: '4',
-        user_id: '104',
-        subject: 'Incorrect charges',
-        description: 'I was charged twice for the same order. Need immediate assistance.',
-        status: 'open',
-        priority: 'urgent',
-        created_at: new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString(),
-        category: 'billing',
-        user_name: 'Taylor Garcia',
-        user_email: 'taylor@example.com'
-      },
-      {
-        id: '5',
-        user_id: '105',
-        subject: 'Vendor application status',
-        description: 'I submitted a vendor application last week and haven\'t heard back.',
-        status: 'resolved',
-        priority: 'low',
-        created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-        category: 'vendor',
-        resolved_by: 'Support Team',
-        user_name: 'Jamie Williams',
-        user_email: 'jamie@example.com'
-      },
-      {
-        id: '6',
-        user_id: '106',
-        subject: 'App not working',
-        description: 'The mobile app keeps crashing when I try to place an order.',
-        status: 'closed',
-        priority: 'medium',
-        created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(),
-        category: 'technical',
-        resolved_by: 'Tech Support',
-        user_name: 'Riley Brown',
-        user_email: 'riley@example.com'
-      }
-    ];
-
-    setTickets(mockTickets);
-  }, [profile, isLoading]);
-
-  const handleViewTicket = (ticket: SupportTicket) => {
-    setSelectedTicket(ticket);
-    
-    // Simulate fetching messages
-    const mockMessages: TicketMessage[] = [
-      {
-        id: '101',
-        ticket_id: ticket.id,
-        user_id: ticket.user_id,
-        message: ticket.description,
-        created_at: ticket.created_at,
-        is_from_support: false,
-        user_name: ticket.user_name
-      }
-    ];
-    
-    // Add simulated conversation if ticket is in progress
-    if (ticket.status === 'in_progress' || ticket.status === 'resolved') {
-      mockMessages.push({
-        id: '102',
-        ticket_id: ticket.id,
-        user_id: 'support1',
-        message: "Hello, I'm reviewing your case. Could you provide more details about your issue?",
-        created_at: new Date(new Date(ticket.created_at).getTime() + 1 * 60 * 60 * 1000).toISOString(),
-        is_from_support: true,
-        user_name: 'Support Agent'
-      });
-      
-      mockMessages.push({
-        id: '103',
-        ticket_id: ticket.id,
-        user_id: ticket.user_id,
-        message: "Thank you for responding. The order number is #5432 and I ordered from Campus Cafe at 1:30 PM.",
-        created_at: new Date(new Date(ticket.created_at).getTime() + 2 * 60 * 60 * 1000).toISOString(),
-        is_from_support: false,
-        user_name: ticket.user_name
-      });
-    }
-    
-    // Add resolution message if resolved
-    if (ticket.status === 'resolved' || ticket.status === 'closed') {
-      mockMessages.push({
-        id: '104',
-        ticket_id: ticket.id,
-        user_id: 'support1',
-        message: "I've looked into this issue and have processed your request. Please let us know if you need any further assistance.",
-        created_at: new Date(new Date(ticket.created_at).getTime() + 3 * 60 * 60 * 1000).toISOString(),
-        is_from_support: true,
-        user_name: 'Support Agent'
-      });
-      
-      mockMessages.push({
-        id: '105',
-        ticket_id: ticket.id,
-        user_id: ticket.user_id,
-        message: "Thank you for your help! Issue is resolved.",
-        created_at: new Date(new Date(ticket.created_at).getTime() + 4 * 60 * 60 * 1000).toISOString(),
-        is_from_support: false,
-        user_name: ticket.user_name
-      });
-    }
-    
-    setTicketMessages(mockMessages);
-    setTicketDetailsOpen(true);
   };
 
-  const handleUpdateStatus = (ticketId: string, newStatus: SupportTicket['status']) => {
+  const fetchTicketResponses = async (ticketId: string) => {
+    if (!profile?.id || !hasPermission) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("ticket_responses")
+        .select(
+          `
+          *,
+          responder_profile:responder_id(id, email, first_name, last_name, profile_image_url, role)
+        `
+        )
+        .eq("ticket_id", ticketId)
+        .order("created_at", { ascending: true });
+
+      if (error) throw error;
+      setTicketResponses(data || []);
+    } catch (err: unknown) {
+      console.error("Error loading ticket responses:", err);
+    }
+  };
+
+  const fetchSupportStaff = async () => {
+    if (!profile?.id || !hasPermission) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, email, first_name, last_name, profile_image_url")
+        .in("role", ["super_admin", "admin", "user_support_admin"]);
+
+      if (error) throw error;
+      setSupportStaff(data || []);
+    } catch (err: unknown) {
+      console.error("Error loading support staff:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (profile && hasPermission) {
+      fetchTickets(page);
+      fetchSupportStaff();
+    }
+  }, [profile, page, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleViewTicket = async (ticket: SupportTicket) => {
+    setSelectedTicket(ticket);
+    await fetchTicketResponses(ticket.id);
+    setIsDetailModalOpen(true);
+  };
+
+  const handleAssignTicket = async (
+    ticketId: string,
+    staffId: string | null
+  ) => {
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
-    
-    // Simulate API call
-    setTimeout(() => {
-      // Update tickets state
-      setTickets(tickets.map(ticket => 
-        ticket.id === ticketId ? { ...ticket, status: newStatus, updated_at: new Date().toISOString() } : ticket
-      ));
-      
-      // Update selected ticket if open
+
+    try {
+      const { error } = await supabase
+        .from("support_tickets")
+        .update({
+          assigned_to: staffId,
+          status: staffId ? "in_progress" : "new", // Set to in_progress only if assigned
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", ticketId);
+
+      if (error) throw error;
+
+      // Find the staff member's name for the success message
+      let successMessage = "Ticket unassigned";
+
+      if (staffId) {
+        const assignedStaff = supportStaff.find(
+          (staff) => staff.id === staffId
+        );
+        const staffName = assignedStaff
+          ? `${assignedStaff.first_name || ""} ${
+              assignedStaff.last_name || ""
+            }`.trim() || assignedStaff.email
+          : "selected staff member";
+
+        successMessage = `Ticket assigned to ${staffName}`;
+      }
+
+      setSuccess(successMessage);
+
+      // Refresh the tickets list
+      fetchTickets(page);
+
+      // If the ticket detail modal is open, update the selected ticket
       if (selectedTicket && selectedTicket.id === ticketId) {
-        setSelectedTicket({ ...selectedTicket, status: newStatus, updated_at: new Date().toISOString() });
+        // Fetch the updated ticket details
+        const { data, error: fetchError } = await supabase
+          .from("support_tickets")
+          .select(
+            `
+            *,
+            user_profile:user_id(id, email, first_name, last_name, profile_image_url, role),
+            assigned_to_profile:assigned_to(id, email, first_name, last_name, profile_image_url, role)
+          `
+          )
+          .eq("id", ticketId)
+          .single();
+
+        if (fetchError) throw fetchError;
+        setSelectedTicket(data);
       }
-      
-      setSuccess(`Ticket status updated to ${newStatus.replace('_', ' ')}`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error assigning ticket");
+      console.error(err);
+    } finally {
       setIsSubmitting(false);
-    }, 500);
+      setIsAssignModalOpen(false);
+    }
   };
 
-  const handleSendMessage = () => {
-    if (!selectedTicket || !newMessage.trim()) return;
-    
+  const handleSendResponse = async () => {
+    if (!selectedTicket || !responseText.trim()) return;
+
     setIsSubmitting(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const newTicketMessage: TicketMessage = {
-        id: `new-${Date.now()}`,
-        ticket_id: selectedTicket.id,
-        user_id: profile?.id || 'support',
-        message: newMessage,
-        created_at: new Date().toISOString(),
-        is_from_support: true,
-        user_name: profile?.first_name || 'Support Agent'
-      };
-      
-      // Update messages
-      setTicketMessages([...ticketMessages, newTicketMessage]);
-      
-      // Clear input
-      setNewMessage('');
-      
-      // If ticket was open, move to in_progress
-      if (selectedTicket.status === 'open') {
-        handleUpdateStatus(selectedTicket.id, 'in_progress');
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // First, add the response
+      const { data: responseData, error: responseError } = await supabase
+        .from("ticket_responses")
+        .insert({
+          ticket_id: selectedTicket.id,
+          responder_id: profile?.id,
+          response: responseText.trim(),
+          is_internal: isInternalResponse,
+        })
+        .select();
+
+      if (responseError) throw responseError;
+
+      // Then update the ticket status (if not internal)
+      if (!isInternalResponse) {
+        const newStatus =
+          selectedTicket.status === "new"
+            ? "in_progress"
+            : selectedTicket.status;
+
+        const { error: ticketError } = await supabase
+          .from("support_tickets")
+          .update({
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", selectedTicket.id);
+
+        if (ticketError) throw ticketError;
       }
-      
+
+      setSuccess("Response added successfully");
+
+      // Add the new response to the list
+      const newResponse = {
+        ...responseData[0],
+        responder_profile: {
+          id: profile?.id || "",
+          email: profile?.email || "",
+          first_name: profile?.first_name || null,
+          last_name: profile?.last_name || null,
+          profile_image_url: profile?.profile_image_url || null,
+          role: profile?.role || "",
+        },
+      };
+
+      setTicketResponses([...ticketResponses, newResponse]);
+
+      // Reset form
+      setResponseText("");
+      setIsInternalResponse(false);
+      setIsResponseModalOpen(false);
+
+      // Refresh tickets list
+      fetchTickets(page);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error adding response");
+      console.error(err);
+    } finally {
       setIsSubmitting(false);
-    }, 500);
+    }
   };
 
-  // Filter tickets based on search query and status filter
-  const filteredTickets = tickets.filter(ticket => {
-    const searchMatches = 
+  const handleCreateTicket = async () => {
+    if (!newTicket.subject.trim() || !newTicket.description.trim()) {
+      setError("Please fill in all required fields");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Assuming you're creating a ticket on behalf of a user - either specify user_id or use admin's id
+      const { error } = await supabase
+        .from("support_tickets")
+        .insert({
+          user_id: profile?.id, // Admin creating the ticket
+          subject: newTicket.subject.trim(),
+          description: newTicket.description.trim(),
+          status: "new",
+          priority: newTicket.priority,
+          related_order_id: newTicket.related_order_id,
+          related_item_id: newTicket.related_item_id,
+        })
+        .select();
+
+      if (error) throw error;
+
+      setSuccess("Ticket created successfully");
+
+      // Reset form and close modal
+      setNewTicket({
+        subject: "",
+        description: "",
+        priority: "medium",
+        related_order_id: null,
+        related_item_id: null,
+      });
+
+      setIsNewTicketModalOpen(false);
+
+      // Refresh tickets list
+      fetchTickets(page);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error creating ticket");
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const updateTicketStatus = async (
+    ticketId: string,
+    status: "new" | "in_progress" | "resolved" | "closed"
+  ) => {
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const { error } = await supabase
+        .from("support_tickets")
+        .update({
+          status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", ticketId);
+
+      if (error) throw error;
+
+      setSuccess(`Ticket status updated to ${status}`);
+
+      // Refresh tickets list
+      fetchTickets(page);
+
+      // If the ticket detail modal is open, update the selected ticket
+      if (selectedTicket && selectedTicket.id === ticketId) {
+        setSelectedTicket({
+          ...selectedTicket,
+          status,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Error updating ticket status"
+      );
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Filter tickets based on search query and active filters
+  const filteredTickets = tickets.filter((ticket) => {
+    // Filter by search query
+    const matchesSearch =
+      searchQuery === "" ||
       ticket.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
       ticket.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ticket.user_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ticket.user_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ticket.category.toLowerCase().includes(searchQuery.toLowerCase());
+      ticket.user_profile?.email
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase()) ||
+      `${ticket.user_profile?.first_name || ""} ${
+        ticket.user_profile?.last_name || ""
+      }`
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase());
 
-    const statusMatches = statusFilter === 'all' || ticket.status === statusFilter;
-    
-    return searchMatches && statusMatches;
+    // Filter by status
+    const matchesStatus =
+      activeFilters.status === "all" || ticket.status === activeFilters.status;
+
+    // Filter by priority
+    const matchesPriority =
+      activeFilters.priority === "all" ||
+      ticket.priority === activeFilters.priority;
+
+    // Filter by assigned to
+    const matchesAssignedTo =
+      activeFilters.assignedTo === "all" ||
+      (activeFilters.assignedTo === "unassigned" && !ticket.assigned_to) ||
+      (activeFilters.assignedTo === "me" &&
+        ticket.assigned_to === profile?.id) ||
+      ticket.assigned_to === activeFilters.assignedTo;
+
+    return (
+      matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo
+    );
   });
 
-  // Helper for priority badge styling
-  const getPriorityBadgeStyles = (priority: SupportTicket['priority']): string => {
-    switch (priority) {
-      case 'low': return 'bg-blue-50 text-blue-700 border-blue-300 border';
-      case 'medium': return 'bg-yellow-50 text-yellow-700 border-yellow-300 border';
-      case 'high': return 'bg-orange-50 text-orange-700 border-orange-300 border';
-      case 'urgent': return 'bg-red-50 text-red-700 border-red-300 border';
-      default: return 'bg-gray-50 text-gray-700 border-gray-300 border';
-    }
-  };
-
-  // Helper for status badge styling
-  const getStatusBadgeStyles = (status: SupportTicket['status']): string => {
-    switch (status) {
-      case 'open': return 'bg-blue-50 text-blue-700 border-blue-300 border';
-      case 'in_progress': return 'bg-yellow-50 text-yellow-700 border-yellow-300 border';
-      case 'resolved': return 'bg-green-50 text-green-700 border-green-300 border';
-      case 'closed': return 'bg-gray-50 text-gray-700 border-gray-300 border';
-      default: return 'bg-gray-50 text-gray-700 border-gray-300 border';
-    }
-  };
-
-  // Stats by status and priority
-  const ticketStats = {
-    open: tickets.filter(t => t.status === 'open').length,
-    inProgress: tickets.filter(t => t.status === 'in_progress').length,
-    resolved: tickets.filter(t => t.status === 'resolved').length,
-    urgent: tickets.filter(t => t.priority === 'urgent').length,
-    total: tickets.length
-  };
-
   if (isLoading) {
-    return <div className="text-black p-4">Loading...</div>;
+    return <div className="text-black">Loading...</div>;
   }
 
-  // Check if user has appropriate permissions to access this page
-  const canAccessSupportTickets = profile && (
-    profile.role === 'user_support_admin' || 
-    profile.role === 'admin' || 
-    profile.role === 'super_admin'
-  );
-
-  if (!canAccessSupportTickets) {
+  if (!hasPermission) {
     return (
       <div className="p-4">
         <h1 className="text-xl font-bold text-black">Access Denied</h1>
-        <p className="text-black">You do not have permission to access this page.</p>
+        <p className="text-black">
+          You do not have permission to access the support dashboard.
+        </p>
       </div>
     );
   }
 
+  // Helper functions to display formatted badges
+  const getPriorityBadge = (priority: string) => {
+    switch (priority) {
+      case "urgent":
+        return (
+          <Badge className="bg-red-100 text-red-800 border border-red-200">
+            Urgent
+          </Badge>
+        );
+      case "high":
+        return (
+          <Badge className="bg-orange-100 text-orange-800 border border-orange-200">
+            High
+          </Badge>
+        );
+      case "medium":
+        return (
+          <Badge className="bg-yellow-100 text-yellow-800 border border-yellow-200">
+            Medium
+          </Badge>
+        );
+      case "low":
+        return (
+          <Badge className="bg-green-100 text-green-800 border border-green-200">
+            Low
+          </Badge>
+        );
+      default:
+        return (
+          <Badge className="bg-gray-100 text-gray-800 border border-gray-200">
+            {priority}
+          </Badge>
+        );
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "new":
+        return (
+          <Badge className="bg-blue-100 text-blue-800 border border-blue-200">
+            New
+          </Badge>
+        );
+      case "in_progress":
+        return (
+          <Badge className="bg-purple-100 text-purple-800 border border-purple-200">
+            In Progress
+          </Badge>
+        );
+      case "resolved":
+        return (
+          <Badge className="bg-green-100 text-green-800 border border-green-200">
+            Resolved
+          </Badge>
+        );
+      case "closed":
+        return (
+          <Badge className="bg-gray-100 text-gray-800 border border-gray-200">
+            Closed
+          </Badge>
+        );
+      default:
+        return (
+          <Badge className="bg-gray-100 text-gray-800 border border-gray-200">
+            {status}
+          </Badge>
+        );
+    }
+  };
+
   return (
-    <div className="space-y-6 px-2 sm:px-4 pb-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-black mt-4">Support Tickets</h1>
-        <p className="text-black text-sm sm:text-base">
-          Manage and respond to customer support inquiries
-        </p>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-black">
+            Support Tickets
+          </h1>
+          <p className="text-black">
+            Manage customer support tickets and provide assistance
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => fetchTickets(page)}
+            className="gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+          <Button
+            onClick={() => setIsNewTicketModalOpen(true)}
+            className="gap-2 bg-black hover:bg-gray-800 text-white"
+          >
+            <PlusCircle className="h-4 w-4" />
+            New Ticket
+          </Button>
+        </div>
       </div>
 
       {error && (
-        <div className="bg-red-50 p-3 rounded-md border border-red-300">
-          <p className="text-red-800 font-medium text-sm">{error}</p>
+        <div className="bg-red-50 p-4 rounded-md border border-red-300">
+          <p className="text-red-800 font-medium">{error}</p>
         </div>
       )}
 
       {success && (
-        <div className="bg-green-50 p-3 rounded-md border border-green-300">
-          <p className="text-green-800 font-medium text-sm">{success}</p>
+        <div className="bg-green-50 p-4 rounded-md border border-green-300">
+          <p className="text-green-800 font-medium">{success}</p>
         </div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <Card className="border-gray-300">
-          <CardHeader className="pb-2 pt-4 px-3">
-            <CardTitle className="text-sm font-medium text-black">Open</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0 pb-3 px-3">
-            <div className="text-xl font-bold text-blue-600">{ticketStats.open}</div>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-gray-300">
-          <CardHeader className="pb-2 pt-4 px-3">
-            <CardTitle className="text-sm font-medium text-black">In Progress</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0 pb-3 px-3">
-            <div className="text-xl font-bold text-yellow-600">{ticketStats.inProgress}</div>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-gray-300">
-          <CardHeader className="pb-2 pt-4 px-3">
-            <CardTitle className="text-sm font-medium text-black">Resolved</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0 pb-3 px-3">
-            <div className="text-xl font-bold text-green-600">{ticketStats.resolved}</div>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-gray-300">
-          <CardHeader className="pb-2 pt-4 px-3">
-            <CardTitle className="text-sm font-medium text-black">Urgent</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0 pb-3 px-3">
-            <div className="text-xl font-bold text-red-600">{ticketStats.urgent}</div>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-gray-300">
-          <CardHeader className="pb-2 pt-4 px-3">
-            <CardTitle className="text-sm font-medium text-black">Total</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0 pb-3 px-3">
-            <div className="text-xl font-bold text-black">{ticketStats.total}</div>
-          </CardContent>
-        </Card>
-      </div>
+      <div className="flex justify-between items-center bg-gray-50 p-4 rounded-md border border-gray-200">
+        <div className="flex gap-2 items-center">
+          <Filter className="h-4 w-4 text-gray-500" />
+          <span className="text-sm font-medium text-gray-700">Filters:</span>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center space-x-2">
-          <h2 className="text-lg sm:text-xl font-semibold text-black">Tickets</h2>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-9 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-black"
+          <Select
+            value={activeFilters.status}
+            onValueChange={(value) =>
+              setActiveFilters({ ...activeFilters, status: value })
+            }
           >
-            <option value="all">All Status</option>
-            <option value="open">Open</option>
-            <option value="in_progress">In Progress</option>
-            <option value="resolved">Resolved</option>
-            <option value="closed">Closed</option>
-          </select>
+            <SelectTrigger className="h-8 w-32 bg-white text-black border-gray-300">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="new">New</SelectItem>
+              <SelectItem value="in_progress">In Progress</SelectItem>
+              <SelectItem value="resolved">Resolved</SelectItem>
+              <SelectItem value="closed">Closed</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={activeFilters.priority}
+            onValueChange={(value) =>
+              setActiveFilters({ ...activeFilters, priority: value })
+            }
+          >
+            <SelectTrigger className="h-8 w-32 bg-white text-black border-gray-300">
+              <SelectValue placeholder="Priority" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Priorities</SelectItem>
+              <SelectItem value="urgent">Urgent</SelectItem>
+              <SelectItem value="high">High</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="low">Low</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={activeFilters.assignedTo}
+            onValueChange={(value) =>
+              setActiveFilters({ ...activeFilters, assignedTo: value })
+            }
+          >
+            <SelectTrigger className="h-8 w-40 bg-white text-black border-gray-300">
+              <SelectValue placeholder="Assigned To" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Assignments</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+              <SelectItem value="me">Assigned to Me</SelectItem>
+              {supportStaff.map((staff) => (
+                <SelectItem key={staff.id} value={staff.id}>
+                  {`${staff.first_name || ""} ${
+                    staff.last_name || ""
+                  }`.trim() || staff.email}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        
-        <Input
-          placeholder="Search tickets..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="bg-white text-black border-gray-300 h-9 max-w-sm"
-        />
+
+        <div className="relative w-64">
+          <Search className="absolute left-2 top-2.5 h-4 w-4 text-black" />
+          <Input
+            placeholder="Search tickets..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8 bg-white text-black border-gray-300"
+          />
+        </div>
       </div>
 
-      {/* Tickets List */}
       <Card className="border-gray-300">
         <CardContent className="p-0">
           <Table>
             <TableHeader className="bg-gray-50">
               <TableRow>
-                <TableHead className="text-black">Ticket</TableHead>
+                <TableHead className="text-black">ID</TableHead>
+                <TableHead className="text-black">Subject</TableHead>
                 <TableHead className="text-black">User</TableHead>
-                <TableHead className="text-black">Category</TableHead>
-                <TableHead className="text-black">Priority</TableHead>
                 <TableHead className="text-black">Status</TableHead>
+                <TableHead className="text-black">Priority</TableHead>
+                <TableHead className="text-black">Assigned To</TableHead>
                 <TableHead className="text-black">Created</TableHead>
+                <TableHead className="text-black">Last Activity</TableHead>
+                <TableHead className="text-center text-black">
+                  Responses
+                </TableHead>
                 <TableHead className="text-right text-black">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredTickets.length === 0 ? (
+              {isLoadingTickets ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-black">
-                    No tickets found
+                  <TableCell
+                    colSpan={10}
+                    className="text-center py-8 text-black"
+                  >
+                    <div className="flex justify-center items-center space-x-2">
+                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-gray-900"></div>
+                      <span>Loading tickets...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : filteredTickets.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={10}
+                    className="text-center py-8 text-black"
+                  >
+                    No tickets found matching your filters.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredTickets.map((ticket) => (
                   <TableRow key={ticket.id} className="border-gray-200">
-                    <TableCell className="font-medium text-black">
-                      {ticket.subject}
-                      <p className="text-gray-500 text-xs truncate max-w-xs">{ticket.description}</p>
-                    </TableCell>
-                    <TableCell className="text-black">
-                      <div>{ticket.user_name}</div>
-                      <div className="text-xs text-gray-500">{ticket.user_email}</div>
-                    </TableCell>
-                    <TableCell className="text-black capitalize">{ticket.category}</TableCell>
-                    <TableCell>
-                      <Badge className={getPriorityBadgeStyles(ticket.priority)}>
-                        {ticket.priority.charAt(0).toUpperCase() + ticket.priority.slice(1)}
-                      </Badge>
+                    <TableCell className="font-mono text-xs text-gray-600">
+                      {ticket.id.substring(0, 8)}
                     </TableCell>
                     <TableCell>
-                      <Badge className={getStatusBadgeStyles(ticket.status)}>
-                        {ticket.status === 'in_progress' ? 'In Progress' : 
-                          ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
+                      <div className="font-medium text-black">
+                        {ticket.subject}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate max-w-[250px]">
+                        {ticket.description}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Avatar className="h-6 w-6">
+                          <AvatarImage
+                            src={
+                              ticket.user_profile?.profile_image_url ||
+                              undefined
+                            }
+                            alt="User"
+                          />
+                          <AvatarFallback className="bg-gray-200 text-gray-700 text-xs">
+                            {ticket.user_profile?.first_name?.[0] || ""}
+                            {ticket.user_profile?.last_name?.[0] || ""}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="text-sm text-black">
+                          {`${ticket.user_profile?.first_name || ""} ${
+                            ticket.user_profile?.last_name || ""
+                          }`.trim() || ticket.user_profile?.email}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{getStatusBadge(ticket.status)}</TableCell>
+                    <TableCell>{getPriorityBadge(ticket.priority)}</TableCell>
+                    <TableCell>
+                      {ticket.assigned_to ? (
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-6 w-6">
+                            <AvatarImage
+                              src={
+                                ticket.assigned_to_profile?.profile_image_url ||
+                                undefined
+                              }
+                              alt="Agent"
+                            />
+                            <AvatarFallback className="bg-gray-200 text-gray-700 text-xs">
+                              {ticket.assigned_to_profile?.first_name?.[0] ||
+                                ""}
+                              {ticket.assigned_to_profile?.last_name?.[0] || ""}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-sm text-black">
+                            {`${ticket.assigned_to_profile?.first_name || ""} ${
+                              ticket.assigned_to_profile?.last_name || ""
+                            }`.trim() || ticket.assigned_to_profile?.email}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-500">
+                          Unassigned
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-500">
+                      {formatDistanceToNow(new Date(ticket.created_at), {
+                        addSuffix: true,
+                      })}
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-500">
+                      {ticket.latest_response_at
+                        ? formatDistanceToNow(
+                            new Date(ticket.latest_response_at),
+                            { addSuffix: true }
+                          )
+                        : "No activity"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant="outline" className="bg-gray-50">
+                        {ticket.responses_count}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-black">{formatDate(ticket.created_at)}</TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleViewTicket(ticket)}
-                        className="text-black hover:bg-gray-100"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleViewTicket(ticket)}
+                          className="text-black hover:bg-gray-100"
+                          title="View ticket details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+
+                        {ticket.status !== "closed" && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedTicket(ticket);
+                                setIsAssignModalOpen(true);
+                              }}
+                              className="text-black hover:bg-gray-100"
+                              title="Assign ticket"
+                            >
+                              <UserCircle className="h-4 w-4" />
+                            </Button>
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedTicket(ticket);
+                                setIsResponseModalOpen(true);
+                              }}
+                              className="text-black hover:bg-gray-100"
+                              title="Add response"
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+
+                        {ticket.status === "new" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              updateTicketStatus(ticket.id, "in_progress")
+                            }
+                            className="text-blue-600 hover:bg-blue-50"
+                            title="Start working on ticket"
+                          >
+                            <Clock className="h-4 w-4" />
+                          </Button>
+                        )}
+
+                        {(ticket.status === "new" ||
+                          ticket.status === "in_progress") && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              updateTicketStatus(ticket.id, "resolved")
+                            }
+                            className="text-green-600 hover:bg-green-50"
+                            title="Mark as resolved"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -503,150 +937,583 @@ export default function SupportTicketsPage() {
         </CardContent>
       </Card>
 
-      {/* Ticket Details Dialog */}
-      <Dialog open={ticketDetailsOpen} onOpenChange={setTicketDetailsOpen}>
-        <DialogContent className="sm:max-w-2xl max-w-[90%] bg-white text-black border-gray-300">
+      {/* Pagination controls */}
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-gray-500">
+          Showing {Math.min((page - 1) * pageSize + 1, totalTickets)} to{" "}
+          {Math.min(page * pageSize, totalTickets)} of {totalTickets} tickets
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+            disabled={page === 1}
+            className="text-black"
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((prev) => prev + 1)}
+            disabled={page * pageSize >= totalTickets}
+            className="text-black"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+
+      {/* Ticket Detail Modal */}
+      <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>
+        <DialogContent className="bg-white text-black border-gray-300 max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-black">Ticket #{selectedTicket?.id}</DialogTitle>
-            <DialogDescription className="text-black">
-              {selectedTicket?.subject}
+            <DialogTitle className="text-2xl font-bold text-black flex items-center gap-3">
+              <span>{selectedTicket?.subject}</span>
+              {selectedTicket && getStatusBadge(selectedTicket.status)}
+              {selectedTicket && getPriorityBadge(selectedTicket.priority)}
+            </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Created{" "}
+              {selectedTicket &&
+                format(new Date(selectedTicket.created_at), "PPP p")}
             </DialogDescription>
           </DialogHeader>
 
           {selectedTicket && (
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2 justify-between items-center">
-                <div className="flex flex-wrap gap-2">
-                  <Badge className={getStatusBadgeStyles(selectedTicket.status)}>
-                    {selectedTicket.status === 'in_progress' ? 'In Progress' : 
-                      selectedTicket.status.charAt(0).toUpperCase() + selectedTicket.status.slice(1)}
-                  </Badge>
-                  
-                  <Badge className={getPriorityBadgeStyles(selectedTicket.priority)}>
-                    {selectedTicket.priority.charAt(0).toUpperCase() + selectedTicket.priority.slice(1)} Priority
-                  </Badge>
-                  
-                  <Badge variant="outline" className="capitalize">
-                    {selectedTicket.category}
-                  </Badge>
-                </div>
-                
-                <div className="text-sm text-gray-500">
-                  {formatDate(selectedTicket.created_at)}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-sm font-medium text-black">User Information</h3>
-                <div className="text-sm text-black">
-                  <p><span className="font-medium">Name:</span> {selectedTicket.user_name}</p>
-                  <p><span className="font-medium">Email:</span> {selectedTicket.user_email}</p>
-                </div>
-              </div>
-
-              {/* Conversation */}
-              <div className="space-y-2 border rounded-md p-4 max-h-96 overflow-y-auto">
-                <h3 className="text-sm font-medium text-black">Conversation</h3>
-                <div className="space-y-3">
-                  {ticketMessages.map((message) => (
-                    <div 
-                      key={message.id} 
-                      className={`flex ${message.is_from_support ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div 
-                        className={`max-w-[80%] rounded-lg p-3 ${
-                          message.is_from_support 
-                            ? 'bg-blue-50 text-blue-800' 
-                            : 'bg-gray-100 text-black'
-                        }`}
-                      >
-                        <div className="text-xs mb-1">
-                          {message.is_from_support ? 'Support Team' : message.user_name}
-                          <span className="text-gray-500 ml-2">
-                            {new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          </span>
-                        </div>
-                        <p className="text-sm whitespace-pre-wrap">{message.message}</p>
+            <div className="py-4 space-y-6">
+              {/* User info and ticket details */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Card className="col-span-1">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-black">
+                      Customer
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage
+                          src={
+                            selectedTicket.user_profile?.profile_image_url ||
+                            undefined
+                          }
+                          alt="User"
+                        />
+                        <AvatarFallback className="bg-gray-200 text-gray-700">
+                          {selectedTicket.user_profile?.first_name?.[0] || ""}
+                          {selectedTicket.user_profile?.last_name?.[0] || ""}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-black">
+                          {`${selectedTicket.user_profile?.first_name || ""} ${
+                            selectedTicket.user_profile?.last_name || ""
+                          }`.trim() || "User"}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {selectedTicket.user_profile?.email}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Role: {selectedTicket.user_profile?.role}
+                        </p>
                       </div>
                     </div>
-                  ))}
+                  </CardContent>
+                </Card>
+
+                <Card className="col-span-1">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-black">
+                      Status Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <p className="text-xs text-gray-500">Current Status</p>
+                      <div className="mt-1">
+                        {getStatusBadge(selectedTicket.status)}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-gray-500">Priority</p>
+                      <div className="mt-1">
+                        {getPriorityBadge(selectedTicket.priority)}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-gray-500">Assigned To</p>
+                      {selectedTicket.assigned_to ? (
+                        <div className="flex items-center gap-2 mt-1">
+                          <Avatar className="h-6 w-6">
+                            <AvatarImage
+                              src={
+                                selectedTicket.assigned_to_profile
+                                  ?.profile_image_url || undefined
+                              }
+                              alt="Agent"
+                            />
+                            <AvatarFallback className="bg-gray-200 text-gray-700">
+                              {selectedTicket.assigned_to_profile
+                                ?.first_name?.[0] || ""}
+                              {selectedTicket.assigned_to_profile
+                                ?.last_name?.[0] || ""}
+                            </AvatarFallback>
+                          </Avatar>
+                          <p className="text-sm text-black">
+                            {`${
+                              selectedTicket.assigned_to_profile?.first_name ||
+                              ""
+                            } ${
+                              selectedTicket.assigned_to_profile?.last_name ||
+                              ""
+                            }`.trim() ||
+                              selectedTicket.assigned_to_profile?.email}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-sm text-gray-500">
+                          Unassigned
+                        </div>
+                      )}
+                      <div className="mt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-gray-700"
+                          onClick={() => {
+                            setSelectedStaffId(
+                              selectedTicket.assigned_to || ""
+                            );
+                            setIsAssignModalOpen(true);
+                          }}
+                        >
+                          Change Assignment
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="col-span-1">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-black">
+                      Related Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {selectedTicket.related_order_id && (
+                      <div>
+                        <p className="text-xs text-gray-500">Related Order</p>
+                        <p className="mt-1 text-sm text-black">
+                          #{selectedTicket.related_order_id}
+                        </p>
+                      </div>
+                    )}
+
+                    {selectedTicket.related_item_id && (
+                      <div>
+                        <p className="text-xs text-gray-500">Related Item</p>
+                        <p className="mt-1 text-sm text-black">
+                          #{selectedTicket.related_item_id}
+                        </p>
+                      </div>
+                    )}
+
+                    <div>
+                      <p className="text-xs text-gray-500">Last Updated</p>
+                      <p className="mt-1 text-sm text-black">
+                        {format(new Date(selectedTicket.updated_at), "PPP p")}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Ticket description */}
+              <div>
+                <h3 className="font-medium text-lg text-black mb-2">
+                  Description
+                </h3>
+                <div className="bg-gray-50 p-4 rounded-md border border-gray-200 whitespace-pre-wrap text-black">
+                  {selectedTicket.description}
                 </div>
               </div>
 
-              {/* Reply area - only show if not closed */}
-              {selectedTicket.status !== 'closed' && (
-                <div className="space-y-3">
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <textarea
-                        value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
-                        placeholder="Type your reply..."
-                        className="w-full rounded-md border border-gray-300 p-3 h-24 text-black"
-                      />
-                    </div>
+              {/* Response Timeline */}
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-medium text-lg text-black">
+                    Response Timeline
+                  </h3>
+                  {selectedTicket.status !== "closed" && (
                     <Button
-                      onClick={handleSendMessage}
-                      disabled={!newMessage.trim() || isSubmitting}
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                      variant="outline"
+                      className="gap-2 text-gray-700"
+                      onClick={() => setIsResponseModalOpen(true)}
                     >
-                      <Send className="h-4 w-4 mr-2" />
-                      Send
+                      <MessageSquare className="h-4 w-4" />
+                      Add Response
                     </Button>
-                  </div>
+                  )}
                 </div>
-              )}
+
+                {ticketResponses.length > 0 ? (
+                  <div className="space-y-4">
+                    {ticketResponses.map((response) => (
+                      <div
+                        key={response.id}
+                        className={`p-4 rounded-md border ${
+                          response.is_internal
+                            ? "bg-yellow-50 border-yellow-200"
+                            : response.responder_id === selectedTicket.user_id
+                            ? "bg-blue-50 border-blue-200"
+                            : "bg-gray-50 border-gray-200"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <Avatar className="h-6 w-6">
+                            <AvatarImage
+                              src={
+                                response.responder_profile?.profile_image_url ||
+                                undefined
+                              }
+                              alt="User"
+                            />
+                            <AvatarFallback className="bg-gray-200 text-gray-700">
+                              {response.responder_profile?.first_name?.[0] ||
+                                ""}
+                              {response.responder_profile?.last_name?.[0] || ""}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex flex-col">
+                            <p className="text-sm font-medium text-black">
+                              {`${
+                                response.responder_profile?.first_name || ""
+                              } ${
+                                response.responder_profile?.last_name || ""
+                              }`.trim() || response.responder_profile?.email}
+                              {response.responder_id ===
+                                selectedTicket.user_id && " (Customer)"}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {format(new Date(response.created_at), "PPP p")}
+                            </p>
+                          </div>
+
+                          {response.is_internal && (
+                            <Badge className="ml-auto bg-yellow-100 text-yellow-800 border border-yellow-200">
+                              Internal Note
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="whitespace-pre-wrap text-black text-sm mt-2">
+                          {response.response}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-6 bg-gray-50 rounded-md border border-gray-200">
+                    <p className="text-gray-500">No responses yet.</p>
+                  </div>
+                )}
+              </div>
 
               {/* Action buttons */}
-              <div className="flex justify-between items-center pt-4 border-t">
+              <div className="flex justify-between pt-4 border-t border-gray-200">
                 <div className="space-x-2">
-                  {selectedTicket.status === 'open' && (
-                    <Button
-                      onClick={() => handleUpdateStatus(selectedTicket.id, 'in_progress')}
-                      disabled={isSubmitting}
-                      variant="outline"
-                      className="border-yellow-400 text-yellow-700 hover:bg-yellow-50"
-                    >
-                      Mark In Progress
-                    </Button>
-                  )}
-                  
-                  {(selectedTicket.status === 'open' || selectedTicket.status === 'in_progress') && (
-                    <Button
-                      onClick={() => handleUpdateStatus(selectedTicket.id, 'resolved')}
-                      disabled={isSubmitting}
-                      variant="outline"
-                      className="border-green-400 text-green-700 hover:bg-green-50"
-                    >
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Resolve
-                    </Button>
-                  )}
-                  
-                  {selectedTicket.status === 'resolved' && (
-                    <Button
-                      onClick={() => handleUpdateStatus(selectedTicket.id, 'closed')}
-                      disabled={isSubmitting}
-                      variant="outline"
-                      className="border-gray-400 text-gray-700 hover:bg-gray-50"
-                    >
-                      <XCircle className="h-4 w-4 mr-1" />
-                      Close
-                    </Button>
+                  {selectedTicket.status !== "closed" && (
+                    <>
+                      {selectedTicket.status === "new" && (
+                        <Button
+                          variant="outline"
+                          className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                          onClick={() =>
+                            updateTicketStatus(selectedTicket.id, "in_progress")
+                          }
+                          disabled={isSubmitting}
+                        >
+                          <Clock className="h-4 w-4 mr-1" />
+                          Mark In Progress
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        className="border-green-300 text-green-700 hover:bg-green-50"
+                        onClick={() =>
+                          updateTicketStatus(selectedTicket.id, "resolved")
+                        }
+                        disabled={
+                          selectedTicket.status === "resolved" || isSubmitting
+                        }
+                      >
+                        <Check className="h-4 w-4 mr-1" />
+                        Mark Resolved
+                      </Button>
+                    </>
                   )}
                 </div>
-                
-                <Button
-                  onClick={() => setTicketDetailsOpen(false)}
-                  className="bg-black hover:bg-gray-800 text-white"
-                >
-                  Close
-                </Button>
+                <div>
+                  <Button
+                    variant={
+                      selectedTicket.status === "closed"
+                        ? "outline"
+                        : "destructive"
+                    }
+                    onClick={() =>
+                      updateTicketStatus(
+                        selectedTicket.id,
+                        selectedTicket.status === "closed"
+                          ? "in_progress"
+                          : "closed"
+                      )
+                    }
+                    disabled={isSubmitting}
+                  >
+                    {selectedTicket.status === "closed"
+                      ? "Reopen Ticket"
+                      : "Close Ticket"}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Assign Ticket Modal */}
+      <Dialog open={isAssignModalOpen} onOpenChange={setIsAssignModalOpen}>
+        <DialogContent className="bg-white text-black border-gray-300">
+          <DialogHeader>
+            <DialogTitle className="text-black">Assign Ticket</DialogTitle>
+            <DialogDescription className="text-black">
+              {selectedTicket?.subject}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <div className="mb-4">
+              <Label htmlFor="staff-select" className="text-black">
+                Select Support Staff
+              </Label>
+              <Select
+                value={selectedStaffId}
+                onValueChange={setSelectedStaffId}
+              >
+                <SelectTrigger
+                  id="staff-select"
+                  className="mt-1 bg-white text-black border-gray-300"
+                >
+                  <SelectValue placeholder="Select a staff member" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {supportStaff.map((staff) => (
+                    <SelectItem key={staff.id} value={staff.id}>
+                      {`${staff.first_name || ""} ${
+                        staff.last_name || ""
+                      }`.trim() || staff.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => {
+                if (selectedTicket) {
+                  // If "unassigned" is selected, pass null for the staffId
+                  const staffIdToAssign =
+                    selectedStaffId === "unassigned" ? null : selectedStaffId;
+                  handleAssignTicket(selectedTicket.id, staffIdToAssign);
+                }
+              }}
+            >
+              Assign to Me
+            </Button>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAssignModalOpen(false)}
+              className="text-black border-gray-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedTicket) {
+                  handleAssignTicket(selectedTicket.id, selectedStaffId || "");
+                }
+              }}
+              disabled={isSubmitting}
+              className="bg-black text-white"
+            >
+              {isSubmitting ? "Assigning..." : "Assign Ticket"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Response Modal */}
+      <Dialog open={isResponseModalOpen} onOpenChange={setIsResponseModalOpen}>
+        <DialogContent className="bg-white text-black border-gray-300">
+          <DialogHeader>
+            <DialogTitle className="text-black">Add Response</DialogTitle>
+            <DialogDescription className="text-black">
+              {selectedTicket?.subject}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <div className="mb-4">
+              <Label htmlFor="response" className="text-black">
+                Your Response
+              </Label>
+              <Textarea
+                id="response"
+                value={responseText}
+                onChange={(e) => setResponseText(e.target.value)}
+                placeholder="Enter your response"
+                className="mt-2 min-h-[150px] bg-white text-black border-gray-300"
+              />
+            </div>
+
+            <div className="flex items-center space-x-2 mb-4">
+              <Checkbox
+                id="is-internal"
+                checked={isInternalResponse}
+                onCheckedChange={(checked) => setIsInternalResponse(!!checked)}
+              />
+              <Label htmlFor="is-internal" className="text-black">
+                Internal note (not visible to customer)
+              </Label>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsResponseModalOpen(false)}
+              className="text-black border-gray-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendResponse}
+              disabled={isSubmitting || !responseText.trim()}
+              className="bg-black text-white"
+            >
+              {isSubmitting
+                ? "Sending..."
+                : isInternalResponse
+                ? "Add Internal Note"
+                : "Send Response"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create New Ticket Modal */}
+      <Dialog
+        open={isNewTicketModalOpen}
+        onOpenChange={setIsNewTicketModalOpen}
+      >
+        <DialogContent className="bg-white text-black border-gray-300">
+          <DialogHeader>
+            <DialogTitle className="text-black">
+              Create New Support Ticket
+            </DialogTitle>
+            <DialogDescription className="text-black">
+              Fill out the details to create a new support ticket
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-4">
+            <div>
+              <Label htmlFor="subject" className="text-black">
+                Subject <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="subject"
+                value={newTicket.subject}
+                onChange={(e) =>
+                  setNewTicket({ ...newTicket, subject: e.target.value })
+                }
+                placeholder="Brief description of the issue"
+                className="mt-1 bg-white text-black border-gray-300"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="description" className="text-black">
+                Description <span className="text-red-500">*</span>
+              </Label>
+              <Textarea
+                id="description"
+                value={newTicket.description}
+                onChange={(e) =>
+                  setNewTicket({ ...newTicket, description: e.target.value })
+                }
+                placeholder="Detailed explanation of the issue"
+                className="mt-1 min-h-[150px] bg-white text-black border-gray-300"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="priority" className="text-black">
+                Priority
+              </Label>
+              <Select
+                value={newTicket.priority}
+                onValueChange={(value: "low" | "medium" | "high" | "urgent") =>
+                  setNewTicket({ ...newTicket, priority: value })
+                }
+              >
+                <SelectTrigger
+                  id="priority"
+                  className="mt-1 bg-white text-black border-gray-300"
+                >
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsNewTicketModalOpen(false)}
+              className="text-black border-gray-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateTicket}
+              disabled={
+                isSubmitting ||
+                !newTicket.subject.trim() ||
+                !newTicket.description.trim()
+              }
+              className="bg-black text-white"
+            >
+              {isSubmitting ? "Creating..." : "Create Ticket"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
-} 
+}

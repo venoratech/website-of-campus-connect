@@ -23,9 +23,8 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatDate } from '@/lib/utils';
-import { Eye, CheckCircle, XCircle, AlertTriangle, Flag, Filter } from 'lucide-react';
+import { Eye, CheckCircle, XCircle, Flag, Filter } from 'lucide-react';
 import Image from 'next/image';
 
 // Define interfaces
