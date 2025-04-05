@@ -130,11 +130,11 @@ export default function SignupPage() {
               >
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="vendor" id="vendor" />
-                  <Label htmlFor="vendor" className="font-normal cursor-pointer">Vendor</Label>
+                  <Label htmlFor="vendor" className="font-normal cursor-pointer text-lg text-black">Vendor</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="cashier" id="cashier" />
-                  <Label htmlFor="cashier" className="font-normal cursor-pointer">Cashier</Label>
+                  <Label htmlFor="cashier" className="font-normal cursor-pointer text-lg text-black">Cashier</Label>
                 </div>
               </RadioGroup>
             </div>
