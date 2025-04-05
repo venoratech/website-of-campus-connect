@@ -25,9 +25,19 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatDate, formatTime, formatPrice } from '@/lib/utils';
-import { Eye, ArrowRight, Check, Coffee, Clock } from 'lucide-react';
+import { 
+  Eye, 
+  ArrowRight, 
+  Check, 
+  Coffee, 
+  Clock, 
+  CheckCircle, 
+  XCircle,
+
+} from 'lucide-react';
 import useInterval from '@/lib/useInterval';
-import { CashierInvitations } from '../../../components/cashier/CashierInvitations'; // Import the new component
+import { CashierInvitations } from '../../../components/cashier/CashierInvitations';
+import Image from 'next/image';
 
 // Original interfaces preserved...
 interface MenuItemRaw {
@@ -146,7 +156,9 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
-  const [showInvitations, setShowInvitations] = useState(true); // Control invitations display
+  const [showInvitations, setShowInvitations] = useState(true);
+
+
 
   const fetchData = async () => {
     try {
@@ -303,10 +315,11 @@ export default function OrdersPage() {
   };
 
   const handleUpdateOrderStatus = async (order: FoodOrder, newStatus: string) => {
-    if (!confirm(`Are you sure you want to mark this order as ${newStatus}?`)) {
+    // Only ask for confirmation on cancellation
+    if (newStatus === 'cancelled' && !viewOrderOpen && !confirm(`Are you sure you want to reject order #${order.order_number}?`)) {
       return;
     }
-
+    
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -360,6 +373,28 @@ export default function OrdersPage() {
     }
   };
 
+  // Quick accept order - changes status from pending to confirmed
+  const handleAcceptOrder = async (order: FoodOrder) => {
+    if (order.status !== 'pending') {
+      setError("Only pending orders can be accepted");
+      return;
+    }
+    
+    await handleUpdateOrderStatus(order, 'confirmed');
+  };
+  
+  // Quick reject order - changes status to cancelled
+  const handleRejectOrder = async (order: FoodOrder) => {
+    if (order.status !== 'pending') {
+      setError("Only pending orders can be rejected");
+      return;
+    }
+    
+    if (confirm(`Are you sure you want to reject order #${order.order_number}?`)) {
+      await handleUpdateOrderStatus(order, 'cancelled');
+    }
+  };
+
   // Handle when a cashier accepts an invitation
   const handleInvitationResponded = () => {
     // Refresh data after a short delay
@@ -380,15 +415,89 @@ export default function OrdersPage() {
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
-      'pending': { color: 'border-yellow-400 bg-yellow-50 text-yellow-700', label: 'Pending' },
-      'confirmed': { color: 'border-blue-400 bg-blue-50 text-blue-700', label: 'Confirmed' },
-      'preparing': { color: 'border-purple-400 bg-purple-50 text-purple-700', label: 'Preparing' },
-      'ready': { color: 'border-orange-400 bg-orange-50 text-orange-700', label: 'Ready for Pickup' },
-      'completed': { color: 'border-green-400 bg-green-50 text-green-700', label: 'Completed' },
-      'cancelled': { color: 'border-red-400 bg-red-50 text-red-700', label: 'Cancelled' }
+      'pending': { color: 'border-yellow-400 bg-yellow-50 text-yellow-700', label: 'Pending', icon: <Clock className="h-3 w-3 mr-1" /> },
+      'confirmed': { color: 'border-blue-400 bg-blue-50 text-blue-700', label: 'Confirmed', icon: <Check className="h-3 w-3 mr-1" /> },
+      'preparing': { color: 'border-purple-400 bg-purple-50 text-purple-700', label: 'Preparing', icon: <Coffee className="h-3 w-3 mr-1" /> },
+      'ready': { color: 'border-orange-400 bg-orange-50 text-orange-700', label: 'Ready for Pickup', icon: <Check className="h-3 w-3 mr-1" /> },
+      'completed': { color: 'border-green-400 bg-green-50 text-green-700', label: 'Completed', icon: <CheckCircle className="h-3 w-3 mr-1" /> },
+      'cancelled': { color: 'border-red-400 bg-red-50 text-red-700', label: 'Cancelled', icon: <XCircle className="h-3 w-3 mr-1" /> }
     };
-    const config = statusConfig[status as keyof typeof statusConfig] || { color: 'border-blue-400 bg-blue-50 text-blue-700', label: status };
-    return <Badge className={`${config.color} border`}>{config.label}</Badge>;
+    const config = statusConfig[status as keyof typeof statusConfig] || { color: 'border-blue-400 bg-blue-50 text-blue-700', label: status, icon: null };
+    return (
+      <Badge className={`${config.color} border flex items-center`}>
+        {config.icon}
+        <span>{config.label}</span>
+      </Badge>
+    );
+  };
+
+  const getQuickActions = (orderData: OrderWithDetails) => {
+    const status = orderData.order.status;
+    const actions = [];
+    
+    // Add Accept/Reject buttons for pending orders
+    if (status === 'pending') {
+      actions.push(
+        <Button
+          key="accept"
+          variant="ghost"
+          size="sm"
+          onClick={() => handleAcceptOrder(orderData.order)}
+          disabled={isSubmitting}
+          className="text-green-600 hover:bg-green-50 hover:text-green-700"
+          title="Accept Order"
+        >
+          <CheckCircle className="h-4 w-4 mr-1" />
+          Accept
+        </Button>
+      );
+      
+      actions.push(
+        <Button
+          key="reject"
+          variant="ghost"
+          size="sm"
+          onClick={() => handleRejectOrder(orderData.order)}
+          disabled={isSubmitting}
+          className="text-red-600 hover:bg-red-50 hover:text-red-700"
+          title="Reject Order"
+        >
+          <XCircle className="h-4 w-4 mr-1" />
+          Reject
+        </Button>
+      );
+      
+      return actions;
+    }
+    
+    // Add "Next Status" button if applicable
+    const nextStatus = getNextStatus(status);
+    if (nextStatus) {
+      const nextStatusLabels = {
+        'confirmed': { text: 'Start Prep', icon: <Coffee className="h-4 w-4 mr-1" /> },
+        'preparing': { text: 'Ready', icon: <Check className="h-4 w-4 mr-1" /> },
+        'ready': { text: 'Complete', icon: <CheckCircle className="h-4 w-4 mr-1" /> },
+      };
+      
+      const label = nextStatusLabels[nextStatus as keyof typeof nextStatusLabels];
+      
+      actions.push(
+        <Button
+          key="next-status"
+          variant="ghost"
+          size="sm"
+          onClick={() => handleUpdateOrderStatus(orderData.order, nextStatus)}
+          disabled={isSubmitting}
+          className="text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+          title={`Mark as ${nextStatus}`}
+        >
+          {label ? label.icon : <ArrowRight className="h-4 w-4 mr-1" />}
+          {label ? label.text : nextStatus}
+        </Button>
+      );
+    }
+    
+    return actions;
   };
 
   const filteredOrders = orders.filter(o => {
@@ -399,6 +508,8 @@ export default function OrdersPage() {
     const orderMatchesStatus = statusFilter === 'all' || o.order.status === statusFilter;
     return orderMatchesSearch && orderMatchesStatus;
   });
+
+
 
   if (isLoading) {
     return <div className="text-black">Loading...</div>;
@@ -499,105 +610,88 @@ export default function OrdersPage() {
         </div>
       )}
 
+      {/* Interactive Status Cards */}
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
-        <Card className={`border-gray-300 ${statusFilter === 'all' ? 'ring-2 ring-gray-800' : ''}`}>
+        <Card 
+          className={`border-gray-300 ${statusFilter === 'all' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          onClick={() => setStatusFilter('all')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">All Orders</CardTitle>
           </CardHeader>
           <CardContent className="pt-1">
             <div className="text-2xl font-bold text-black">{orders.length}</div>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start p-0 h-auto text-xs text-black"
-              onClick={() => setStatusFilter('all')}
-            >
-              View orders
-            </Button>
+            <p className="text-xs text-black mt-1">Click to view all orders</p>
           </CardContent>
         </Card>
         
-        <Card className={`border-gray-300 ${statusFilter === 'pending' ? 'ring-2 ring-gray-800' : ''}`}>
+        <Card 
+          className={`border-gray-300 ${statusFilter === 'pending' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          onClick={() => setStatusFilter('pending')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Pending</CardTitle>
             <Clock className="h-4 w-4 text-yellow-500" />
           </CardHeader>
           <CardContent className="pt-1">
             <div className="text-2xl font-bold text-black">{orderStatusCounts.pending}</div>
-            <Button 
-              variant="ghost"
-              className="w-full justify-start p-0 h-auto text-xs text-black"
-              onClick={() => setStatusFilter('pending')}
-            >
-              View orders
-            </Button>
+            <p className="text-xs text-black mt-1">Waiting for confirmation</p>
           </CardContent>
         </Card>
         
-        <Card className={`border-gray-300 ${statusFilter === 'confirmed' ? 'ring-2 ring-gray-800' : ''}`}>
+        <Card 
+          className={`border-gray-300 ${statusFilter === 'confirmed' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          onClick={() => setStatusFilter('confirmed')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Confirmed</CardTitle>
             <Check className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent className="pt-1">
             <div className="text-2xl font-bold text-black">{orderStatusCounts.confirmed}</div>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start p-0 h-auto text-xs text-black"
-              onClick={() => setStatusFilter('confirmed')}
-            >
-              View orders
-            </Button>
+            <p className="text-xs text-black mt-1">Ready to prepare</p>
           </CardContent>
         </Card>
         
-        <Card className={`border-gray-300 ${statusFilter === 'preparing' ? 'ring-2 ring-gray-800' : ''}`}>
+        <Card 
+          className={`border-gray-300 ${statusFilter === 'preparing' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          onClick={() => setStatusFilter('preparing')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Preparing</CardTitle>
             <Coffee className="h-4 w-4 text-purple-500" />
           </CardHeader>
           <CardContent className="pt-1">
             <div className="text-2xl font-bold text-black">{orderStatusCounts.preparing}</div>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start p-0 h-auto text-xs text-black"
-              onClick={() => setStatusFilter('preparing')}
-            >
-              View orders
-            </Button>
+            <p className="text-xs text-black mt-1">In progress</p>
           </CardContent>
         </Card>
         
-        <Card className={`border-gray-300 ${statusFilter === 'ready' ? 'ring-2 ring-gray-800' : ''}`}>
+        <Card 
+          className={`border-gray-300 ${statusFilter === 'ready' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          onClick={() => setStatusFilter('ready')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Ready</CardTitle>
             <Check className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent className="pt-1">
             <div className="text-2xl font-bold text-black">{orderStatusCounts.ready}</div>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start p-0 h-auto text-xs text-black"
-              onClick={() => setStatusFilter('ready')}
-            >
-              View orders
-            </Button>
+            <p className="text-xs text-black mt-1">Ready for pickup</p>
           </CardContent>
         </Card>
         
-        <Card className={`border-gray-300 ${statusFilter === 'completed' ? 'ring-2 ring-gray-800' : ''}`}>
+        <Card 
+          className={`border-gray-300 ${statusFilter === 'completed' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          onClick={() => setStatusFilter('completed')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium text-black">Completed</CardTitle>
-            <Check className="h-4 w-4 text-gray-500" />
+            <CheckCircle className="h-4 w-4 text-gray-500" />
           </CardHeader>
           <CardContent className="pt-1">
             <div className="text-2xl font-bold text-black">{orderStatusCounts.completed}</div>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-start p-0 h-auto text-xs text-black"
-              onClick={() => setStatusFilter('completed')}
-            >
-              View orders
-            </Button>
+            <p className="text-xs text-black mt-1">Delivered to customer</p>
           </CardContent>
         </Card>
       </div>
@@ -643,15 +737,16 @@ export default function OrdersPage() {
                   }
                   <TableHead className="text-black">Date</TableHead>
                   <TableHead className="text-black">Total</TableHead>
+                  <TableHead className="text-black">Payment</TableHead>
                   <TableHead className="text-black">Status</TableHead>
-                  <TableHead className="text-right text-black">Actions</TableHead>
+                  <TableHead className="text-black" colSpan={2}>Items & Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredOrders.length === 0 ? (
                   <TableRow>
                     <TableCell 
-                      colSpan={(profile.role === 'admin' || profile.role === 'super_admin') ? 7 : 6} 
+                      colSpan={(profile.role === 'admin' || profile.role === 'super_admin') ? 9 : 8} 
                       className="text-center py-8 text-black"
                     >
                       No orders found
@@ -681,27 +776,64 @@ export default function OrdersPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-black">{formatPrice(orderData.order.total)}</TableCell>
+                      <TableCell className="text-black">
+                        {orderData.order.payment_method ? (
+                          <Badge variant="outline" className="bg-gray-50">
+                            {orderData.order.payment_method}
+                          </Badge>
+                        ) : (
+                          <span className="text-gray-400">Not specified</span>
+                        )}
+                      </TableCell>
                       <TableCell>{getStatusBadge(orderData.order.status)}</TableCell>
+                      <TableCell className="text-black">
+                        <div className="flex flex-wrap gap-1 py-1 max-w-md">
+                          {orderData.orderItems.map((item) => (
+                            <div 
+                              key={item.id}
+                              className="flex items-center bg-white rounded-md border border-gray-100 shadow-sm p-1"
+                              title={`${item.menu_items.name}: ${item.quantity}x ${formatPrice(item.unit_price)}`}
+                            >
+                              <div className="h-8 w-8 relative flex-shrink-0 mr-1 bg-gray-100 rounded overflow-hidden">
+                                {item.menu_items?.image_url ? (
+                                  <Image 
+                                    src={item.menu_items.image_url}
+                                    alt={item.menu_items.name}
+                                    fill
+                                    sizes="32px"
+                                    style={{ objectFit: 'cover' }}
+                                  />
+                                ) : (
+                                  <div className="flex items-center justify-center h-full w-full bg-gray-200">
+                                    <Coffee className="h-4 w-4 text-gray-400" />
+                                  </div>
+                                )}
+                                <div className="absolute -right-1 -bottom-1 bg-blue-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                                  {item.quantity}
+                                </div>
+                              </div>
+                              <div className="flex flex-col">
+                                <p className="text-xs font-medium truncate max-w-[80px]">{item.menu_items.name}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleViewOrder(orderData)}
-                          className="text-black hover:bg-gray-100"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {['pending', 'confirmed', 'preparing', 'ready'].includes(orderData.order.status) && (
+                        <div className="flex flex-col space-y-1">
+                          <div className="flex flex-wrap gap-1 mb-1">
+                            {getQuickActions(orderData)}
+                          </div>
                           <Button
                             variant="ghost"
-                            size="icon"
-                            onClick={() => handleUpdateOrderStatus(orderData.order, getNextStatus(orderData.order.status) || '')}
-                            disabled={isSubmitting}
-                            className="text-black hover:bg-gray-100"
+                            size="sm"
+                            onClick={() => handleViewOrder(orderData)}
+                            className="text-gray-600 hover:bg-gray-100"
                           >
-                            <ArrowRight className="h-4 w-4" />
+                            <Eye className="h-4 w-4 mr-1" />
+                            Details
                           </Button>
-                        )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -744,6 +876,77 @@ export default function OrdersPage() {
                       <p className="text-black"><span className="font-medium">Payment Method:</span> {selectedOrder.order.payment_method}</p>
                     )}
                   </div>
+                  
+                  {/* Quick status update buttons in the modal */}
+                  {['pending', 'confirmed', 'preparing', 'ready'].includes(selectedOrder.order.status) && (
+                    <div className="mt-3 border-t pt-3">
+                      <h4 className="text-sm font-medium text-black mb-2">Update Status</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedOrder.order.status === 'pending' && (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'confirmed')}
+                              disabled={isSubmitting}
+                              className="bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              Accept Order
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                if (confirm("Are you sure you want to cancel this order?")) {
+                                  handleUpdateOrderStatus(selectedOrder.order, 'cancelled');
+                                }
+                              }}
+                              disabled={isSubmitting}
+                              className="bg-red-600 hover:bg-red-700 text-white"
+                            >
+                              <XCircle className="h-4 w-4 mr-1" />
+                              Reject Order
+                            </Button>
+                          </>
+                        )}
+                        
+                        {selectedOrder.order.status === 'confirmed' && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'preparing')}
+                            disabled={isSubmitting}
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                          >
+                            <Coffee className="h-4 w-4 mr-1" />
+                            Start Preparing
+                          </Button>
+                        )}
+                        
+                        {selectedOrder.order.status === 'preparing' && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'ready')}
+                            disabled={isSubmitting}
+                            className="bg-orange-600 hover:bg-orange-700 text-white"
+                          >
+                            <Check className="h-4 w-4 mr-1" />
+                            Mark Ready
+                          </Button>
+                        )}
+                        
+                        {selectedOrder.order.status === 'ready' && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'completed')}
+                            disabled={isSubmitting}
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Complete Order
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -753,6 +956,7 @@ export default function OrdersPage() {
                   <Table>
                     <TableHeader className="bg-gray-50">
                       <TableRow>
+                        <TableHead className="text-black w-[60px]"></TableHead>
                         <TableHead className="text-black">Item</TableHead>
                         <TableHead className="text-right text-black">Qty</TableHead>
                         <TableHead className="text-right text-black">Price</TableHead>
@@ -762,6 +966,23 @@ export default function OrdersPage() {
                     <TableBody>
                       {selectedOrder.orderItems.map((item) => (
                         <TableRow key={item.id} className="border-gray-200">
+                          <TableCell className="p-1">
+                            <div className="h-12 w-12 relative rounded overflow-hidden bg-gray-100">
+                              {item.menu_items?.image_url ? (
+                                <Image 
+                                  src={item.menu_items.image_url}
+                                  alt={item.menu_items.name}
+                                  fill
+                                  sizes="48px"
+                                  style={{ objectFit: 'cover' }}
+                                />
+                              ) : (
+                                <div className="flex items-center justify-center h-full w-full">
+                                  <Coffee className="h-6 w-6 text-gray-400" />
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell className="text-black">
                             <div>
                               <p className="font-medium">{item.menu_items?.name}</p>
@@ -814,15 +1035,18 @@ export default function OrdersPage() {
                   <p className="mt-1 text-black">{formatDate(selectedOrder.order.scheduled_pickup_time)} at {formatTime(selectedOrder.order.scheduled_pickup_time)}</p>
                 </div>
               )}
-              <div className="flex justify-end space-x-2">
+              
+              <div className="flex justify-end space-x-2 mt-6">
                 {selectedOrder.order.status !== 'completed' && selectedOrder.order.status !== 'cancelled' && (
                   <>
                     {selectedOrder.order.status === 'pending' && (
                       <Button
                         variant="destructive"
                         onClick={() => {
-                          handleUpdateOrderStatus(selectedOrder.order, 'cancelled');
-                          setViewOrderOpen(false);
+                          if (confirm("Are you sure you want to cancel this order?")) {
+                            handleUpdateOrderStatus(selectedOrder.order, 'cancelled');
+                            setViewOrderOpen(false);
+                          }
                         }}
                         disabled={isSubmitting}
                         className="bg-red-600 hover:bg-red-700 text-white"
@@ -830,23 +1054,14 @@ export default function OrdersPage() {
                         Cancel Order
                       </Button>
                     )}
-                    <Button
-                      onClick={() => {
-                        const nextStatus = getNextStatus(selectedOrder.order.status);
-                        if (nextStatus) {
-                          handleUpdateOrderStatus(selectedOrder.order, nextStatus);
-                        }
-                      }}
-                      disabled={isSubmitting || !getNextStatus(selectedOrder.order.status)}
-                      className="bg-gray-800 hover:bg-black text-white"
-                    >
-                      {getNextStatus(selectedOrder.order.status) === 'confirmed' && 'Confirm Order'}
-                      {getNextStatus(selectedOrder.order.status) === 'preparing' && 'Start Preparing'}
-                      {getNextStatus(selectedOrder.order.status) === 'ready' && 'Mark Ready'}
-                      {getNextStatus(selectedOrder.order.status) === 'completed' && 'Complete Order'}
-                    </Button>
                   </>
                 )}
+                <Button
+                  onClick={() => setViewOrderOpen(false)}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-800"
+                >
+                  Close
+                </Button>
               </div>
             </div>
           )}
