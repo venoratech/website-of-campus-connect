@@ -1,7 +1,7 @@
 // app/dashboard/orders/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, FoodOrder, FoodVendor } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,19 +27,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatDate, formatTime, formatPrice } from '@/lib/utils';
 import { 
   Eye, 
-  ArrowRight, 
   Check, 
   Coffee, 
   Clock, 
   CheckCircle, 
   XCircle,
-
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import useInterval from '@/lib/useInterval';
 import { CashierInvitations } from '../../../components/cashier/CashierInvitations';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import Image from 'next/image';
 
-// Original interfaces preserved...
 interface MenuItemRaw {
   id?: string;
   name?: string;
@@ -104,7 +105,6 @@ function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
   );
 }
 
-// Helper functions preserved...
 const convertMenuItems = (menuItemsArray: MenuItemRaw | MenuItemRaw[]): MenuItem => {
   if (Array.isArray(menuItemsArray)) {
     const firstItem = menuItemsArray[0] || {};
@@ -157,14 +157,112 @@ export default function OrdersPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
   const [showInvitations, setShowInvitations] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('orderSoundEnabled') !== 'false';
+    }
+    return true;
+  });
+  
+  const orderAudioRef = useRef<HTMLAudioElement | null>(null);
+  const fetchDataRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const fetchOrdersForVendorRef = useRef<(vendorId: string, previousPendingCount: number) => Promise<void>>(() => Promise.resolve());
+  const updateOrdersAndTimeRef = useRef<(ordersWithDetails: OrderWithDetails[], previousPendingCount: number) => void>(() => {});
 
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.Audio) {
+      orderAudioRef.current = new Audio('/sounds/service-bell-ring-14610.mp3');
+      if (orderAudioRef.current) {
+        orderAudioRef.current.load();
+        orderAudioRef.current.volume = 0.7;
+      }
+    }
+    return () => {
+      if (orderAudioRef.current) {
+        orderAudioRef.current.pause();
+        orderAudioRef.current = null;
+      }
+    };
+  }, []);
 
+  const handleToggleSound = (enabled: boolean) => {
+    setSoundEnabled(enabled);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('orderSoundEnabled', enabled.toString());
+    }
+    if (enabled && orderAudioRef.current) {
+      const testAudio = orderAudioRef.current.cloneNode() as HTMLAudioElement;
+      testAudio.volume = 0.3;
+      testAudio.play().catch(err => console.error('Error playing test sound:', err));
+    }
+  };
 
-  const fetchData = async () => {
+  const playOrderSound = useCallback(() => {
+    if (!orderAudioRef.current || !soundEnabled) return;
+    try {
+      const soundToPlay = orderAudioRef.current.cloneNode() as HTMLAudioElement;
+      soundToPlay.volume = 0.7;
+      soundToPlay.play().catch(err => {
+        console.error('Error playing notification sound:', err);
+      });
+    } catch (err) {
+      console.error('Failed to play notification sound:', err);
+    }
+  }, [soundEnabled]);
+
+  const updateOrdersAndTime = useCallback((ordersWithDetails: OrderWithDetails[], previousPendingCount: number) => {
+    const currentPendingCount = ordersWithDetails.filter(o => o.order.status === 'pending').length;
+    
+    if (lastFetchTime && currentPendingCount > previousPendingCount && soundEnabled) {
+      playOrderSound();
+    }
+    
+    setOrders(ordersWithDetails);
+    setLastFetchTime(new Date());
+  }, [lastFetchTime, soundEnabled, playOrderSound]);
+
+  const fetchOrdersForVendor = useCallback(async (vendorId: string, previousPendingCount: number) => {
+    const { data: ordersData, error: ordersError } = await supabase
+      .from('food_orders')
+      .select('*')
+      .eq('vendor_id', vendorId)
+      .order('created_at', { ascending: false });
+    
+    if (ordersError) throw ordersError;
+    
+    const ordersWithDetails: OrderWithDetails[] = await Promise.all(
+      ordersData.map(async (order) => {
+        const { data: customerData } = await supabase
+          .from('profiles')
+          .select('id, email, first_name, last_name')
+          .eq('id', order.customer_id)
+          .single();
+        
+        const { data: orderItemsData } = await supabase
+          .from('order_items')
+          .select(`
+            id, quantity, unit_price, subtotal, special_instructions,
+            menu_items (id, name, image_url)
+          `)
+          .eq('order_id', order.id);
+        
+        return {
+          order,
+          orderItems: (orderItemsData || []).map(convertOrderItem),
+          customer: convertCustomer(customerData),
+          vendorName: vendor?.vendor_name || 'Unknown Vendor'
+        };
+      })
+    );
+    
+    updateOrdersAndTime(ordersWithDetails, previousPendingCount);
+  }, [vendor, updateOrdersAndTime]);
+
+  const fetchData = useCallback(async () => {
     try {
       setError(null);
+      const previousPendingCount = orders.filter(o => o.order.status === 'pending').length;
       
-      // Handle vendor role
       if (profile?.role === 'vendor') {
         const { data: vendorData, error: vendorError } = await supabase
           .from('food_vendors')
@@ -181,16 +279,12 @@ export default function OrdersPage() {
         }
         
         setVendor(vendorData);
-        await fetchOrdersForVendor(vendorData.id);
-      } 
-      // Handle cashier role
-      else if (profile?.role === 'cashier') {
-        // Get the cashier's associated vendor using the new function
+        await fetchOrdersForVendor(vendorData.id, previousPendingCount);
+      } else if (profile?.role === 'cashier') {
         const { data, error: vendorError } = await supabase
           .rpc('get_cashier_vendor', { p_cashier_id: profile.id });
         
         if (vendorError || !data.success) {
-          // If no vendor is associated, we don't show an error - the invitations component will handle it
           if (data?.message === 'Cashier is not associated with any vendor') {
             setShowInvitations(true);
           } else {
@@ -199,15 +293,11 @@ export default function OrdersPage() {
           return;
         }
         
-        // We have a vendor, so we can hide the invitations
         setShowInvitations(false);
-        
         const vendorData = data.vendor;
         setVendor(vendorData);
-        await fetchOrdersForVendor(vendorData.id);
-      }
-      // Handle admin role
-      else if (profile?.role === 'admin' || profile?.role === 'super_admin') {
+        await fetchOrdersForVendor(vendorData.id, previousPendingCount);
+      } else if (profile?.role === 'admin' || profile?.role === 'super_admin') {
         const { data: ordersData, error: ordersError } = await supabase
           .from('food_orders')
           .select('*')
@@ -246,8 +336,7 @@ export default function OrdersPage() {
           })
         );
         
-        setOrders(ordersWithDetails);
-        setLastFetchTime(new Date());
+        updateOrdersAndTime(ordersWithDetails, previousPendingCount);
       } else {
         setError('You do not have permission to view orders');
       }
@@ -256,56 +345,26 @@ export default function OrdersPage() {
       setError(errorMessage);
       console.error(err);
     }
-  };
+  }, [profile, orders, fetchOrdersForVendor, updateOrdersAndTime]);
 
-  // Helper function to fetch orders for a specific vendor
-  const fetchOrdersForVendor = async (vendorId: string) => {
-    const { data: ordersData, error: ordersError } = await supabase
-      .from('food_orders')
-      .select('*')
-      .eq('vendor_id', vendorId)
-      .order('created_at', { ascending: false });
-    
-    if (ordersError) throw ordersError;
-    
-    const ordersWithDetails: OrderWithDetails[] = await Promise.all(
-      ordersData.map(async (order) => {
-        const { data: customerData } = await supabase
-          .from('profiles')
-          .select('id, email, first_name, last_name')
-          .eq('id', order.customer_id)
-          .single();
-        
-        const { data: orderItemsData } = await supabase
-          .from('order_items')
-          .select(`
-            id, quantity, unit_price, subtotal, special_instructions,
-            menu_items (id, name, image_url)
-          `)
-          .eq('order_id', order.id);
-        
-        return {
-          order,
-          orderItems: (orderItemsData || []).map(convertOrderItem),
-          customer: convertCustomer(customerData),
-          vendorName: vendor?.vendor_name || 'Unknown Vendor'
-        };
-      })
-    );
-    
-    setOrders(ordersWithDetails);
-    setLastFetchTime(new Date());
-  };
+  // Update refs when functions change
+  useEffect(() => {
+    fetchDataRef.current = fetchData;
+    fetchOrdersForVendorRef.current = fetchOrdersForVendor;
+    updateOrdersAndTimeRef.current = updateOrdersAndTime;
+  }, [fetchData, fetchOrdersForVendor, updateOrdersAndTime]);
 
+  // Initial data fetch
   useEffect(() => {
     if (profile) {
-      fetchData();
+      fetchDataRef.current?.();
     }
-  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profile]);
 
+  // Periodic refresh
   useInterval(() => {
     if (profile) {
-      fetchData();
+      fetchDataRef.current?.();
     }
   }, 30000);
 
@@ -315,7 +374,6 @@ export default function OrdersPage() {
   };
 
   const handleUpdateOrderStatus = async (order: FoodOrder, newStatus: string) => {
-    // Only ask for confirmation on cancellation
     if (newStatus === 'cancelled' && !viewOrderOpen && !confirm(`Are you sure you want to reject order #${order.order_number}?`)) {
       return;
     }
@@ -323,47 +381,30 @@ export default function OrdersPage() {
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
-
+  
     try {
-      // Validate that newStatus is one of the allowed values
       const validStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
       if (!validStatuses.includes(newStatus)) {
         throw new Error(`Invalid status: ${newStatus}`);
       }
-
-      const { error: updateError } = await supabase
+  
+      // Place debugging logs around your update call:
+      const { data, error } = await supabase
         .from('food_orders')
         .update({ 
-          status: newStatus as 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled',
+          status: newStatus,
           updated_at: new Date().toISOString() 
         })
         .eq('id', order.id);
-
-      if (updateError) throw updateError;
-
+      
+      console.log('Update response data:', data);
+      console.log('Update error:', error);
+  
+      if (error) throw error;
+  
       setSuccess(`Order #${order.order_number} status updated to ${newStatus}`);
-
-      setOrders(orders.map(o => 
-        o.order.id === order.id 
-          ? { 
-              ...o, 
-              order: { 
-                ...o.order, 
-                status: newStatus as 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled'
-              } 
-            } 
-          : o
-      ));
-
-      if (selectedOrder && selectedOrder.order.id === order.id) {
-        setSelectedOrder({
-          ...selectedOrder,
-          order: { 
-            ...selectedOrder.order, 
-            status: newStatus as 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled'
-          }
-        });
-      }
+  
+      // Update local orders state if needed...
     } catch (err: unknown) {
       const errorMessage = isErrorWithMessage(err) ? err.message : 'Error updating order status';
       setError(errorMessage);
@@ -372,8 +413,8 @@ export default function OrdersPage() {
       setIsSubmitting(false);
     }
   };
+  
 
-  // Quick accept order - changes status from pending to confirmed
   const handleAcceptOrder = async (order: FoodOrder) => {
     if (order.status !== 'pending') {
       setError("Only pending orders can be accepted");
@@ -383,7 +424,6 @@ export default function OrdersPage() {
     await handleUpdateOrderStatus(order, 'confirmed');
   };
   
-  // Quick reject order - changes status to cancelled
   const handleRejectOrder = async (order: FoodOrder) => {
     if (order.status !== 'pending') {
       setError("Only pending orders can be rejected");
@@ -395,11 +435,9 @@ export default function OrdersPage() {
     }
   };
 
-  // Handle when a cashier accepts an invitation
   const handleInvitationResponded = () => {
-    // Refresh data after a short delay
     setTimeout(() => {
-      fetchData();
+      fetchDataRef.current?.();
     }, 1000);
   };
 
@@ -415,89 +453,48 @@ export default function OrdersPage() {
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
-      'pending': { color: 'border-yellow-400 bg-yellow-50 text-yellow-700', label: 'Pending', icon: <Clock className="h-3 w-3 mr-1" /> },
-      'confirmed': { color: 'border-blue-400 bg-blue-50 text-blue-700', label: 'Confirmed', icon: <Check className="h-3 w-3 mr-1" /> },
-      'preparing': { color: 'border-purple-400 bg-purple-50 text-purple-700', label: 'Preparing', icon: <Coffee className="h-3 w-3 mr-1" /> },
-      'ready': { color: 'border-orange-400 bg-orange-50 text-orange-700', label: 'Ready for Pickup', icon: <Check className="h-3 w-3 mr-1" /> },
-      'completed': { color: 'border-green-400 bg-green-50 text-green-700', label: 'Completed', icon: <CheckCircle className="h-3 w-3 mr-1" /> },
-      'cancelled': { color: 'border-red-400 bg-red-50 text-red-700', label: 'Cancelled', icon: <XCircle className="h-3 w-3 mr-1" /> }
+      'pending': { 
+        color: 'bg-yellow-100 text-yellow-800 border-yellow-200', 
+        label: 'Pending', 
+        icon: <Clock className="h-3.5 w-3.5 mr-1.5" /> 
+      },
+      'confirmed': { 
+        color: 'bg-blue-100 text-blue-800 border-blue-200', 
+        label: 'Confirmed', 
+        icon: <Check className="h-3.5 w-3.5 mr-1.5" /> 
+      },
+      'preparing': { 
+        color: 'bg-purple-100 text-purple-800 border-purple-200', 
+        label: 'Preparing', 
+        icon: <Coffee className="h-3.5 w-3.5 mr-1.5" /> 
+      },
+      'ready': { 
+        color: 'bg-orange-100 text-orange-800 border-orange-200', 
+        label: 'Ready for Pickup', 
+        icon: <Check className="h-3.5 w-3.5 mr-1.5" /> 
+      },
+      'completed': { 
+        color: 'bg-green-100 text-green-800 border-green-200', 
+        label: 'Completed', 
+        icon: <CheckCircle className="h-3.5 w-3.5 mr-1.5" /> 
+      },
+      'cancelled': { 
+        color: 'bg-red-100 text-red-800 border-red-200', 
+        label: 'Cancelled', 
+        icon: <XCircle className="h-3.5 w-3.5 mr-1.5" /> 
+      }
     };
-    const config = statusConfig[status as keyof typeof statusConfig] || { color: 'border-blue-400 bg-blue-50 text-blue-700', label: status, icon: null };
+    const config = statusConfig[status as keyof typeof statusConfig] || { 
+      color: 'bg-blue-100 text-blue-800 border-blue-200', 
+      label: status, 
+      icon: null 
+    };
     return (
-      <Badge className={`${config.color} border flex items-center`}>
+      <Badge className={`${config.color} border rounded-full px-3 py-1 text-sm font-medium flex items-center shadow-sm`}>
         {config.icon}
         <span>{config.label}</span>
       </Badge>
     );
-  };
-
-  const getQuickActions = (orderData: OrderWithDetails) => {
-    const status = orderData.order.status;
-    const actions = [];
-    
-    // Add Accept/Reject buttons for pending orders
-    if (status === 'pending') {
-      actions.push(
-        <Button
-          key="accept"
-          variant="ghost"
-          size="sm"
-          onClick={() => handleAcceptOrder(orderData.order)}
-          disabled={isSubmitting}
-          className="text-green-600 hover:bg-green-50 hover:text-green-700"
-          title="Accept Order"
-        >
-          <CheckCircle className="h-4 w-4 mr-1" />
-          Accept
-        </Button>
-      );
-      
-      actions.push(
-        <Button
-          key="reject"
-          variant="ghost"
-          size="sm"
-          onClick={() => handleRejectOrder(orderData.order)}
-          disabled={isSubmitting}
-          className="text-red-600 hover:bg-red-50 hover:text-red-700"
-          title="Reject Order"
-        >
-          <XCircle className="h-4 w-4 mr-1" />
-          Reject
-        </Button>
-      );
-      
-      return actions;
-    }
-    
-    // Add "Next Status" button if applicable
-    const nextStatus = getNextStatus(status);
-    if (nextStatus) {
-      const nextStatusLabels = {
-        'confirmed': { text: 'Start Prep', icon: <Coffee className="h-4 w-4 mr-1" /> },
-        'preparing': { text: 'Ready', icon: <Check className="h-4 w-4 mr-1" /> },
-        'ready': { text: 'Complete', icon: <CheckCircle className="h-4 w-4 mr-1" /> },
-      };
-      
-      const label = nextStatusLabels[nextStatus as keyof typeof nextStatusLabels];
-      
-      actions.push(
-        <Button
-          key="next-status"
-          variant="ghost"
-          size="sm"
-          onClick={() => handleUpdateOrderStatus(orderData.order, nextStatus)}
-          disabled={isSubmitting}
-          className="text-blue-600 hover:bg-blue-50 hover:text-blue-700"
-          title={`Mark as ${nextStatus}`}
-        >
-          {label ? label.icon : <ArrowRight className="h-4 w-4 mr-1" />}
-          {label ? label.text : nextStatus}
-        </Button>
-      );
-    }
-    
-    return actions;
   };
 
   const filteredOrders = orders.filter(o => {
@@ -509,13 +506,10 @@ export default function OrdersPage() {
     return orderMatchesSearch && orderMatchesStatus;
   });
 
-
-
   if (isLoading) {
     return <div className="text-black">Loading...</div>;
   }
 
-  // For cashiers with no vendor assignment, show invitations only
   if (profile?.role === 'cashier' && !vendor && showInvitations) {
     return (
       <div className="space-y-6">
@@ -523,9 +517,7 @@ export default function OrdersPage() {
         <p className="text-black">
           You currently aren&apos;t associated with any vendor. Accept an invitation to start managing orders.
         </p>
-        
         {profile?.id && <CashierInvitations userId={profile.id} onInvitationResponded={handleInvitationResponded} />}
-        
         <div className="bg-gray-50 p-8 text-center rounded-md border border-gray-200">
           <h2 className="text-xl font-semibold text-black mb-2">No Vendor Assignment</h2>
           <p className="text-gray-600 mb-4">You need to be assigned to a vendor before you can manage orders.</p>
@@ -537,11 +529,9 @@ export default function OrdersPage() {
     );
   }
 
-  // Updated access check to include cashier role
   const hasAccess = profile?.role === 'vendor' || profile?.role === 'admin' || 
                     profile?.role === 'super_admin' || profile?.role === 'cashier';
   
-  // For vendor and cashier roles, check if vendor data is available
   const needsVendorSetup = (profile?.role === 'vendor' || profile?.role === 'cashier') && !vendor;
 
   if (!hasAccess || needsVendorSetup) {
@@ -589,11 +579,30 @@ export default function OrdersPage() {
               ? 'View and manage all orders'
               : `Manage orders for ${vendor?.vendor_name}`}
           </p>
-          <LastRefreshed />
+          <div className="flex items-center space-x-4">
+            {(profile?.role === 'vendor' || profile?.role === 'cashier') && (
+              <div className="flex items-center space-x-2">
+                <Switch 
+                  id="sound-mode" 
+                  checked={soundEnabled}
+                  onCheckedChange={handleToggleSound}
+                />
+                <Label htmlFor="sound-mode" className="text-black cursor-pointer text-sm flex items-center gap-1">
+                  {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                  Order alerts
+                  {soundEnabled ? (
+                    <span className="ml-1 text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded">ON</span>
+                  ) : (
+                    <span className="ml-1 text-xs bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded">OFF</span>
+                  )}
+                </Label>
+              </div>
+            )}
+            <LastRefreshed />
+          </div>
         </div>
       </div>
 
-      {/* Show invitations for cashiers if there are any */}
       {profile?.role === 'cashier' && profile?.id && 
         <CashierInvitations userId={profile.id} onInvitationResponded={handleInvitationResponded} />
       }
@@ -610,88 +619,87 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Interactive Status Cards */}
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
         <Card 
-          className={`border-gray-300 ${statusFilter === 'all' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          className={`border-gray-200 ${statusFilter === 'all' ? 'ring-2 ring-primary shadow-lg' : 'hover:shadow-md'} cursor-pointer transition-all duration-200`}
           onClick={() => setStatusFilter('all')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">All Orders</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-700">All Orders</CardTitle>
           </CardHeader>
           <CardContent className="pt-1">
-            <div className="text-2xl font-bold text-black">{orders.length}</div>
-            <p className="text-xs text-black mt-1">Click to view all orders</p>
+            <div className="text-2xl font-bold text-gray-900">{orders.length}</div>
+            <p className="text-xs text-gray-500 mt-1">Click to view all orders</p>
           </CardContent>
         </Card>
         
         <Card 
-          className={`border-gray-300 ${statusFilter === 'pending' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          className={`border-gray-200 ${statusFilter === 'pending' ? 'ring-2 ring-yellow-500 shadow-lg' : 'hover:shadow-md'} cursor-pointer transition-all duration-200`}
           onClick={() => setStatusFilter('pending')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Pending</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-700">Pending</CardTitle>
             <Clock className="h-4 w-4 text-yellow-500" />
           </CardHeader>
           <CardContent className="pt-1">
-            <div className="text-2xl font-bold text-black">{orderStatusCounts.pending}</div>
-            <p className="text-xs text-black mt-1">Waiting for confirmation</p>
+            <div className="text-2xl font-bold text-gray-900">{orderStatusCounts.pending}</div>
+            <p className="text-xs text-gray-500 mt-1">Waiting for confirmation</p>
           </CardContent>
         </Card>
         
         <Card 
-          className={`border-gray-300 ${statusFilter === 'confirmed' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          className={`border-gray-200 ${statusFilter === 'confirmed' ? 'ring-2 ring-blue-500 shadow-lg' : 'hover:shadow-md'} cursor-pointer transition-all duration-200`}
           onClick={() => setStatusFilter('confirmed')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Confirmed</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-700">Confirmed</CardTitle>
             <Check className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent className="pt-1">
-            <div className="text-2xl font-bold text-black">{orderStatusCounts.confirmed}</div>
-            <p className="text-xs text-black mt-1">Ready to prepare</p>
+            <div className="text-2xl font-bold text-gray-900">{orderStatusCounts.confirmed}</div>
+            <p className="text-xs text-gray-500 mt-1">Ready to prepare</p>
           </CardContent>
         </Card>
         
         <Card 
-          className={`border-gray-300 ${statusFilter === 'preparing' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          className={`border-gray-200 ${statusFilter === 'preparing' ? 'ring-2 ring-purple-500 shadow-lg' : 'hover:shadow-md'} cursor-pointer transition-all duration-200`}
           onClick={() => setStatusFilter('preparing')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Preparing</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-700">Preparing</CardTitle>
             <Coffee className="h-4 w-4 text-purple-500" />
           </CardHeader>
           <CardContent className="pt-1">
-            <div className="text-2xl font-bold text-black">{orderStatusCounts.preparing}</div>
-            <p className="text-xs text-black mt-1">In progress</p>
+            <div className="text-2xl font-bold text-gray-900">{orderStatusCounts.preparing}</div>
+            <p className="text-xs text-gray-500 mt-1">In progress</p>
           </CardContent>
         </Card>
         
         <Card 
-          className={`border-gray-300 ${statusFilter === 'ready' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          className={`border-gray-200 ${statusFilter === 'ready' ? 'ring-2 ring-orange-500 shadow-lg' : 'hover:shadow-md'} cursor-pointer transition-all duration-200`}
           onClick={() => setStatusFilter('ready')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Ready</CardTitle>
-            <Check className="h-4 w-4 text-green-500" />
+            <CardTitle className="text-sm font-medium text-gray-700">Ready</CardTitle>
+            <Check className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent className="pt-1">
-            <div className="text-2xl font-bold text-black">{orderStatusCounts.ready}</div>
-            <p className="text-xs text-black mt-1">Ready for pickup</p>
+            <div className="text-2xl font-bold text-gray-900">{orderStatusCounts.ready}</div>
+            <p className="text-xs text-gray-500 mt-1">Ready for pickup</p>
           </CardContent>
         </Card>
         
         <Card 
-          className={`border-gray-300 ${statusFilter === 'completed' ? 'ring-2 ring-gray-800' : ''} cursor-pointer transition-all hover:bg-gray-50 hover:shadow`}
+          className={`border-gray-200 ${statusFilter === 'completed' ? 'ring-2 ring-green-500 shadow-lg' : 'hover:shadow-md'} cursor-pointer transition-all duration-200`}
           onClick={() => setStatusFilter('completed')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-black">Completed</CardTitle>
-            <CheckCircle className="h-4 w-4 text-gray-500" />
+            <CardTitle className="text-sm font-medium text-gray-700">Completed</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent className="pt-1">
-            <div className="text-2xl font-bold text-black">{orderStatusCounts.completed}</div>
-            <p className="text-xs text-black mt-1">Delivered to customer</p>
+            <div className="text-2xl font-bold text-gray-900">{orderStatusCounts.completed}</div>
+            <p className="text-xs text-gray-500 mt-1">Delivered to customer</p>
           </CardContent>
         </Card>
       </div>
@@ -699,19 +707,19 @@ export default function OrdersPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <h2 className="text-xl font-semibold text-black">Orders</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Orders</h2>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px] bg-white text-black border-gray-300">
+              <SelectTrigger className="w-[150px] bg-white text-gray-700 border-gray-200 hover:border-gray-300">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
-              <SelectContent className="bg-white text-black">
-                <SelectItem value="all" className="text-black">All Statuses</SelectItem>
-                <SelectItem value="pending" className="text-black">Pending</SelectItem>
-                <SelectItem value="confirmed" className="text-black">Confirmed</SelectItem>
-                <SelectItem value="preparing" className="text-black">Preparing</SelectItem>
-                <SelectItem value="ready" className="text-black">Ready</SelectItem>
-                <SelectItem value="completed" className="text-black">Completed</SelectItem>
-                <SelectItem value="cancelled" className="text-black">Cancelled</SelectItem>
+              <SelectContent className="bg-white">
+                <SelectItem value="all" className="text-gray-700">All Statuses</SelectItem>
+                <SelectItem value="pending" className="text-gray-700">Pending</SelectItem>
+                <SelectItem value="confirmed" className="text-gray-700">Confirmed</SelectItem>
+                <SelectItem value="preparing" className="text-gray-700">Preparing</SelectItem>
+                <SelectItem value="ready" className="text-gray-700">Ready</SelectItem>
+                <SelectItem value="completed" className="text-gray-700">Completed</SelectItem>
+                <SelectItem value="cancelled" className="text-gray-700">Cancelled</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -720,7 +728,7 @@ export default function OrdersPage() {
               placeholder="Search orders..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-white text-black border-gray-300"
+              className="bg-white text-gray-700 border-gray-200 hover:border-gray-300 focus:border-primary focus:ring-primary"
             />
           </div>
         </div>
@@ -730,23 +738,21 @@ export default function OrdersPage() {
             <Table>
               <TableHeader className="bg-gray-50">
                 <TableRow>
-                  <TableHead className="text-black">Order #</TableHead>
-                  <TableHead className="text-black">Customer</TableHead>
-                  {(profile.role === 'admin' || profile.role === 'super_admin') && 
-                    <TableHead className="text-black">Vendor</TableHead>
-                  }
-                  <TableHead className="text-black">Date</TableHead>
-                  <TableHead className="text-black">Total</TableHead>
-                  <TableHead className="text-black">Payment</TableHead>
-                  <TableHead className="text-black">Status</TableHead>
-                  <TableHead className="text-black" colSpan={2}>Items & Actions</TableHead>
+                  <TableHead className="text-black font-bold">Order #</TableHead>
+                  <TableHead className="text-black font-bold">Customer</TableHead>
+                  <TableHead className="text-black font-bold">Pickup Time</TableHead>
+                  <TableHead className="text-black font-bold">Items</TableHead>
+                  <TableHead className="text-black font-bold">Notes</TableHead>
+                  <TableHead className="text-black font-bold">Total</TableHead>
+                  <TableHead className="text-black font-bold">Status</TableHead>
+                  <TableHead className="text-black font-bold text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredOrders.length === 0 ? (
                   <TableRow>
                     <TableCell 
-                      colSpan={(profile.role === 'admin' || profile.role === 'super_admin') ? 9 : 8} 
+                      colSpan={8} 
                       className="text-center py-8 text-black"
                     >
                       No orders found
@@ -754,40 +760,43 @@ export default function OrdersPage() {
                   </TableRow>
                 ) : (
                   filteredOrders.map((orderData) => (
-                    <TableRow key={orderData.order.id} className="border-gray-200">
-                      <TableCell className="font-medium text-black">{orderData.order.order_number}</TableCell>
+                    <TableRow 
+                      key={orderData.order.id} 
+                      className={`border-gray-200 ${orderData.order.special_instructions ? 'border-l-4 border-l-red-500' : ''}`}
+                    >
+                      <TableCell className="font-medium text-black">
+                        <div className="text-lg">{orderData.order.order_number}</div>
+                        <div className="text-xs text-gray-500">{formatDate(orderData.order.created_at)} {formatTime(orderData.order.created_at)}</div>
+                      </TableCell>
+                      
                       <TableCell className="text-black">
                         {orderData.customer ? (
                           <div>
-                            <p>{orderData.customer.first_name} {orderData.customer.last_name}</p>
-                            <p className="text-xs text-black">{orderData.customer.email}</p>
+                            <p className="font-medium">{orderData.customer.first_name} {orderData.customer.last_name}</p>
+                            {orderData.order.payment_method && (
+                              <Badge variant="outline" className="mt-1 bg-gray-50 text-xs">
+                                {orderData.order.payment_method}
+                              </Badge>
+                            )}
                           </div>
                         ) : (
                           'Unknown Customer'
                         )}
                       </TableCell>
-                      {(profile.role === 'admin' || profile.role === 'super_admin') && 
-                        <TableCell className="text-black">{orderData.vendorName}</TableCell>
-                      }
+                      
                       <TableCell className="text-black">
-                        <div>
-                          <p>{formatDate(orderData.order.created_at)}</p>
-                          <p className="text-xs text-black">{formatTime(orderData.order.created_at)}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-black">{formatPrice(orderData.order.total)}</TableCell>
-                      <TableCell className="text-black">
-                        {orderData.order.payment_method ? (
-                          <Badge variant="outline" className="bg-gray-50">
-                            {orderData.order.payment_method}
-                          </Badge>
+                        {orderData.order.scheduled_pickup_time ? (
+                          <div className="flex flex-col">
+                            <span className="font-medium text-blue-800">{formatTime(orderData.order.scheduled_pickup_time)}</span>
+                            <span className="text-xs">{formatDate(orderData.order.scheduled_pickup_time)}</span>
+                          </div>
                         ) : (
-                          <span className="text-gray-400">Not specified</span>
+                          <span className="text-xs text-gray-500">Not scheduled</span>
                         )}
                       </TableCell>
-                      <TableCell>{getStatusBadge(orderData.order.status)}</TableCell>
+                      
                       <TableCell className="text-black">
-                        <div className="flex flex-wrap gap-1 py-1 max-w-md">
+                        <div className="flex flex-wrap gap-1 py-1">
                           {orderData.orderItems.map((item) => (
                             <div 
                               key={item.id}
@@ -812,26 +821,103 @@ export default function OrdersPage() {
                                   {item.quantity}
                                 </div>
                               </div>
-                              <div className="flex flex-col">
-                                <p className="text-xs font-medium truncate max-w-[80px]">{item.menu_items.name}</p>
-                              </div>
+                              <span className="text-xs font-medium truncate max-w-[60px]">{item.menu_items.name}</span>
                             </div>
                           ))}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-col space-y-1">
-                          <div className="flex flex-wrap gap-1 mb-1">
-                            {getQuickActions(orderData)}
+                      
+                      <TableCell className="text-black">
+                        {orderData.order.special_instructions ? (
+                          <div className="px-2 py-1 bg-red-50 border border-red-100 rounded text-red-800 text-xs max-w-[200px] max-h-[80px] overflow-auto">
+                            {orderData.order.special_instructions}
                           </div>
+                        ) : orderData.orderItems.some(item => item.special_instructions) ? (
+                          <div className="px-2 py-1 bg-orange-50 border border-orange-100 rounded text-orange-800 text-xs max-w-[200px] max-h-[80px] overflow-auto">
+                            {orderData.orderItems
+                              .filter(item => item.special_instructions)
+                              .map((item, idx) => (
+                                <div key={item.id || idx} className="mb-1">
+                                  {item.special_instructions}
+                                </div>
+                              ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">None</span>
+                        )}
+                      </TableCell>
+                      
+                      <TableCell className="text-black font-medium">
+                        {formatPrice(orderData.order.total)}
+                      </TableCell>
+                      
+                      <TableCell>
+                        <div className="flex flex-col gap-1">
+                          {getStatusBadge(orderData.order.status)}
+                          {orderData.order.status === 'pending' && (
+                            <span className="text-xs text-red-600 font-medium animate-pulse">
+                              Needs attention!
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      
+                      <TableCell className="text-right">
+                        <div className="flex flex-col space-y-2">
+                          {orderData.order.status === 'pending' && (
+                            <div className="flex flex-col gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => handleAcceptOrder(orderData.order)}
+                                disabled={isSubmitting}
+                                className="bg-green-500 hover:bg-green-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                                <span>Accept</span>
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRejectOrder(orderData.order)}
+                                disabled={isSubmitting}
+                                className="border-red-500 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
+                              >
+                                <XCircle className="h-4 w-4" />
+                                <span>Reject</span>
+                              </Button>
+                            </div>
+                          )}
+                          
+                          {getNextStatus(orderData.order.status) && orderData.order.status !== 'pending' && (
+                            <Button
+                              size="sm"
+                              onClick={() => handleUpdateOrderStatus(orderData.order, getNextStatus(orderData.order.status) || '')}
+                              disabled={isSubmitting}
+                              className={`
+                                ${orderData.order.status === 'confirmed' ? 'bg-purple-500 hover:bg-purple-600' : 
+                                 orderData.order.status === 'preparing' ? 'bg-orange-500 hover:bg-orange-600' : 
+                                 orderData.order.status === 'ready' ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'} 
+                                text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5
+                              `}
+                            >
+                              {orderData.order.status === 'confirmed' && <Coffee className="h-4 w-4" />}
+                              {orderData.order.status === 'preparing' && <Check className="h-4 w-4" />}
+                              {orderData.order.status === 'ready' && <CheckCircle className="h-4 w-4" />}
+                              
+                              {orderData.order.status === 'confirmed' && 'Start Preparing'}
+                              {orderData.order.status === 'preparing' && 'Mark Ready'}
+                              {orderData.order.status === 'ready' && 'Complete Order'}
+                            </Button>
+                          )}
+                          
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleViewOrder(orderData)}
-                            className="text-gray-600 hover:bg-gray-100"
+                            className="text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all duration-200 flex items-center justify-center gap-1.5"
                           >
-                            <Eye className="h-4 w-4 mr-1" />
-                            Details
+                            <Eye className="h-4 w-4" />
+                            <span>Details</span>
                           </Button>
                         </div>
                       </TableCell>
@@ -859,7 +945,6 @@ export default function OrdersPage() {
                   <h3 className="text-sm font-medium text-black">Customer Information</h3>
                   <div className="mt-2 space-y-1">
                     <p className="text-black"><span className="font-medium">Name:</span> {selectedOrder.customer?.first_name} {selectedOrder.customer?.last_name}</p>
-                    <p className="text-black"><span className="font-medium">Email:</span> {selectedOrder.customer?.email}</p>
                   </div>
                 </div>
                 <div>
@@ -876,11 +961,9 @@ export default function OrdersPage() {
                       <p className="text-black"><span className="font-medium">Payment Method:</span> {selectedOrder.order.payment_method}</p>
                     )}
                   </div>
-                  
-                  {/* Quick status update buttons in the modal */}
                   {['pending', 'confirmed', 'preparing', 'ready'].includes(selectedOrder.order.status) && (
                     <div className="mt-3 border-t pt-3">
-                      <h4 className="text-sm font-medium text-black mb-2">Update Status</h4>
+                      <h4 className="text-sm font-medium text-gray-900 mb-2">Update Status</h4>
                       <div className="flex flex-wrap gap-2">
                         {selectedOrder.order.status === 'pending' && (
                           <>
@@ -888,10 +971,10 @@ export default function OrdersPage() {
                               size="sm"
                               onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'confirmed')}
                               disabled={isSubmitting}
-                              className="bg-green-600 hover:bg-green-700 text-white"
+                              className="bg-green-500 hover:bg-green-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
                             >
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              Accept Order
+                              <CheckCircle className="h-4 w-4" />
+                              <span>Accept Order</span>
                             </Button>
                             <Button
                               size="sm"
@@ -901,47 +984,44 @@ export default function OrdersPage() {
                                 }
                               }}
                               disabled={isSubmitting}
-                              className="bg-red-600 hover:bg-red-700 text-white"
+                              className="bg-red-500 hover:bg-red-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
                             >
-                              <XCircle className="h-4 w-4 mr-1" />
-                              Reject Order
+                              <XCircle className="h-4 w-4" />
+                              <span>Reject Order</span>
                             </Button>
                           </>
                         )}
-                        
                         {selectedOrder.order.status === 'confirmed' && (
                           <Button
                             size="sm"
                             onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'preparing')}
                             disabled={isSubmitting}
-                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                            className="bg-purple-500 hover:bg-purple-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
                           >
-                            <Coffee className="h-4 w-4 mr-1" />
-                            Start Preparing
+                            <Coffee className="h-4 w-4" />
+                            <span>Start Preparing</span>
                           </Button>
                         )}
-                        
                         {selectedOrder.order.status === 'preparing' && (
                           <Button
                             size="sm"
                             onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'ready')}
                             disabled={isSubmitting}
-                            className="bg-orange-600 hover:bg-orange-700 text-white"
+                            className="bg-orange-500 hover:bg-orange-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
                           >
-                            <Check className="h-4 w-4 mr-1" />
-                            Mark Ready
+                            <Check className="h-4 w-4" />
+                            <span>Mark Ready</span>
                           </Button>
                         )}
-                        
                         {selectedOrder.order.status === 'ready' && (
                           <Button
                             size="sm"
                             onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'completed')}
                             disabled={isSubmitting}
-                            className="bg-green-600 hover:bg-green-700 text-white"
+                            className="bg-green-500 hover:bg-green-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
                           >
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Complete Order
+                            <CheckCircle className="h-4 w-4" />
+                            <span>Complete Order</span>
                           </Button>
                         )}
                       </div>

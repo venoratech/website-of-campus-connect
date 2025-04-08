@@ -52,6 +52,11 @@ export default function UsersPage() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedRolePermissions, setSelectedRolePermissions] = useState<RolePermission | null>(null);
 
+  
+// Add these state variables to your component
+const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
+
   // State for role management dialog
   const [roleManagementOpen, setRoleManagementOpen] = useState(false);
   const [allRolePermissions, setAllRolePermissions] = useState<RolePermission[]>([]);
@@ -72,6 +77,10 @@ export default function UsersPage() {
     order_management: false,
     payment_processing: false
   });
+
+  
+
+  
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -321,64 +330,95 @@ export default function UsersPage() {
     }
   };
 
-  const handleDeactivateUser = async (userId: string) => {
+  const handleDeleteUser = (userId: string) => {
     if (!canEditUsers) return;
     
-    // Prevent deactivating super_admin if not a super_admin
+    // Find the user to delete
     const targetUser = users.find(u => u.id === userId);
-    if (targetUser?.role === 'super_admin' && profile?.role !== 'super_admin') {
-      setError('Only a super admin can deactivate another super admin');
+    if (!targetUser) {
+      setError('User not found');
       return;
     }
     
-    if (!confirm('Are you sure you want to deactivate this user? They will no longer be able to log in.')) return;
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      // Use the server API route to deactivate user
-      const response = await fetch('/api/deactivate-user', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId }),
-      });
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to deactivate user');
-      }
-
-      setSuccess('User deactivated successfully');
-
-      setUsers(users.map(u =>
-        u.id === userId ? { ...u, is_active: false } : u
-      ));
-
-      if (selectedUser && selectedUser.id === userId) {
-        setSelectedUser({ ...selectedUser, is_active: false });
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Error deactivating user';
-      setError(errorMessage);
-      console.error(err);
-    } finally {
-      setIsSubmitting(false);
+    // Prevent deleting super_admin if not a super_admin
+    if (targetUser.role === 'super_admin' && profile?.role !== 'super_admin') {
+      setError('Only a super admin can delete another super admin');
+      return;
     }
+    
+    // Set the user to delete and open the confirmation dialog
+    setUserToDelete(targetUser);
+    setDeleteConfirmationOpen(true);
   };
+  
+  // Function to perform the actual deletion
+// Updated confirmDeleteUser function without using is_active column
+// Updated confirmDeleteUser function using RPC to bypass RLS
+// Final confirmDeleteUser function that handles deletion without changing role
+// Updated confirmDeleteUser function for permanent deletion
+// Improved client-side delete function with better error handling
+const confirmDeleteUser = async () => {
+  if (!userToDelete) return;
+  
+  setIsSubmitting(true);
+  setError(null);
+  setSuccess(null);
 
-  const filteredUsers = users.filter(user => {
-    const searchMatches =
-      user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (user.first_name && user.first_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (user.last_name && user.last_name.toLowerCase().includes(searchQuery.toLowerCase()));
+  try {
+    // Call the RPC function to permanently delete the user
+    const { data, error } = await supabase.rpc('permanently_delete_user', {
+      user_id: userToDelete.id
+    });
+    
+    if (error) {
+      console.error("RPC Error:", error);
+      
+      // Handle specific constraint errors
+      if (error.message && error.message.includes("violates foreign key constraint")) {
+        throw new Error(`Cannot delete user: There are still records associated with this user that need to be removed first. Please contact a database administrator.`);
+      }
+      
+      throw new Error(`Failed to delete user: ${error.message}`);
+    }
+    
+    if (data && !data.success) {
+      throw new Error(data.error || 'Unknown error occurred');
+    }
 
-    const roleMatches = roleFilter === 'all' || user.role === roleFilter;
-    return searchMatches && roleMatches;
-  });
+    // Display success message
+    setSuccess(`User ${userToDelete.email} was permanently deleted`);
+
+    // Update the UI by removing the user from the list entirely
+    setUsers(users.filter(u => u.id !== userToDelete.id));
+
+    // Close the user details dialog if it was open
+    if (selectedUser && selectedUser.id === userToDelete.id) {
+      setViewUserOpen(false);
+      setSelectedUser(null);
+    }
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Error deleting user';
+    setError(errorMessage);
+    console.error('Delete user error:', err);
+  } finally {
+    setIsSubmitting(false);
+    setDeleteConfirmationOpen(false);
+  }
+};
+// Update the filteredUsers function to exclude deleted users
+// Updated filteredUsers function to exclude users with "deleted_" prefix in email
+const filteredUsers = users.filter(user => {
+  // Exclude users with "deleted_" prefix in their email
+  if (user.email.startsWith('deleted_')) return false;
+  
+  const searchMatches =
+    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (user.first_name && user.first_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (user.last_name && user.last_name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const roleMatches = roleFilter === 'all' || user.role === roleFilter;
+  return searchMatches && roleMatches;
+});
 
   const usersByRole = {
     student: users.filter(u => u.role === 'student').length,
@@ -699,16 +739,17 @@ export default function UsersPage() {
                           <Eye className="h-4 w-4" />
                         </Button>
                         {canEditUsers && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeactivateUser(user.id)}
-                            disabled={user.is_active === false || (user.role === 'super_admin' && profile?.role !== 'super_admin')}
-                            className="h-8 w-8 text-black hover:bg-gray-100"
-                          >
-                            <UserX className="h-4 w-4" />
-                          </Button>
-                        )}
+  <Button
+    variant="ghost"
+    size="icon"
+    onClick={() => handleDeleteUser(user.id)}
+    disabled={user.role === 'super_admin' && profile?.role !== 'super_admin'}
+    className="h-8 w-8 text-red-600 hover:bg-red-50"
+    title="Delete user permanently"
+  >
+    <UserX className="h-4 w-4" />
+  </Button>
+)}
                       </div>
                     </div>
                     
@@ -845,27 +886,30 @@ export default function UsersPage() {
                               <Badge className="border-red-400 bg-red-50 text-red-700 border">ID Missing</Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleViewUser(user)}
-                              className="text-black hover:bg-gray-100"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {canEditUsers && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeactivateUser(user.id)}
-                                disabled={user.is_active === false || (user.role === 'super_admin' && profile?.role !== 'super_admin')}
-                                className="text-black hover:bg-gray-100"
-                              >
-                                <UserX className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </TableCell>
+{/* Desktop Table View - Update UserX icon button to include text */}
+<TableCell className="text-right">
+  <Button
+    variant="ghost"
+    size="sm"
+    onClick={() => handleViewUser(user)}
+    className="text-black hover:bg-gray-100"
+  >
+    <Eye className="h-4 w-4" />
+  </Button>
+  {canEditUsers && (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => handleDeleteUser(user.id)}
+      disabled={user.role === 'super_admin' && profile?.role !== 'super_admin'}
+      className="text-red-600 hover:bg-red-50 flex items-center gap-1"
+      title="Delete user permanently"
+    >
+      <UserX className="h-4 w-4" />
+      <span className="hidden md:inline text-xs">Delete</span>
+    </Button>
+  )}
+</TableCell>
                         </TableRow>
                       ))
                     )}
@@ -1377,6 +1421,58 @@ export default function UsersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+{/* Fixed delete confirmation dialog to resolve HTML validation errors */}
+{/* Updated delete confirmation dialog for permanent deletion */}
+<Dialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
+  <DialogContent className="sm:max-w-md max-w-[90%] bg-white text-black border-gray-300">
+    <DialogHeader>
+      <DialogTitle className="text-black">Delete User Permanently</DialogTitle>
+      <DialogDescription className="text-black">
+        This action <strong>cannot be undone</strong>. The user and all associated data will be permanently deleted.
+      </DialogDescription>
+    </DialogHeader>
+
+    {userToDelete && (
+      <div className="space-y-4">
+        <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+          <p className="text-red-800 text-sm">
+            <strong>Warning:</strong> You are about to permanently delete this user:
+          </p>
+          <div className="mt-2 pl-2 border-l-2 border-red-300">
+            <p className="text-black font-medium">
+              {userToDelete.first_name} {userToDelete.last_name}
+            </p>
+            <p className="text-black text-sm">{userToDelete.email}</p>
+            <div className="flex items-center mt-1">
+              <span className="text-black text-sm mr-2">Role:</span>
+              <Badge className={getRoleBadgeStyles(userToDelete.role)}>
+                {getRoleDisplayName(userToDelete.role)}
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setDeleteConfirmationOpen(false)}
+            className="border-gray-300 text-black hover:bg-gray-100"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmDeleteUser}
+            disabled={isSubmitting}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {isSubmitting ? 'Deleting...' : 'Permanently Delete'}
+          </Button>
+        </DialogFooter>
+      </div>
+    )}
+  </DialogContent>
+</Dialog>
     </div>
   );
 }
