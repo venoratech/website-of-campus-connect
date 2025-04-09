@@ -203,7 +203,7 @@ export default function OrderDetailsPage() {
                   <span className="text-black">{formatPrice(order.subtotal)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Tax</span>
+                  <span className="text-gray-600">Service Fees</span>
                   <span className="text-black">{formatPrice(order.tax)}</span>
                 </div>
                 <div className="flex justify-between font-bold text-lg">

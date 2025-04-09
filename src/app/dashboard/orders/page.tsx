@@ -33,7 +33,8 @@ import {
   CheckCircle, 
   XCircle,
   Volume2,
-  VolumeX
+  VolumeX,
+  CalendarClock
 } from 'lucide-react';
 import useInterval from '@/lib/useInterval';
 import { CashierInvitations } from '../../../components/cashier/CashierInvitations';
@@ -96,6 +97,19 @@ interface ErrorWithMessage {
   message: string;
 }
 
+// Time slot types
+type TimeSlot = {
+  label: string;
+  startTime: string;
+  endTime: string;
+};
+
+type OrderStatus = FoodOrder['status'];
+
+
+// Time filter options
+type TimeFilterOption = 'all' | 'upcoming' | 'past' | 'slot';
+
 function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
   return (
     typeof error === 'object' &&
@@ -144,6 +158,35 @@ const convertCustomer = (customer: CustomerRaw | null): Customer | null => {
   };
 };
 
+// Generate time slots (30-minute intervals)
+const generateTimeSlots = (): TimeSlot[] => {
+  const slots: TimeSlot[] = [];
+  const now = new Date();
+  const startHour = 6; // 6:00 AM
+  const endHour = 24; // 12:00 AM
+
+  for (let hour = startHour; hour < endHour; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      const startTime = new Date(now);
+      startTime.setHours(hour, minute, 0, 0);
+      
+      const endTime = new Date(startTime);
+      endTime.setMinutes(endTime.getMinutes() + 30);
+      
+      const startLabel = formatTime(startTime.toISOString());
+      const endLabel = formatTime(endTime.toISOString());
+      
+      slots.push({
+        label: `${startLabel} - ${endLabel}`,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString()
+      });
+    }
+  }
+  
+  return slots;
+};
+
 export default function OrdersPage() {
   const { profile, isLoading } = useAuth();
   const [orders, setOrders] = useState<OrderWithDetails[]>([]);
@@ -151,6 +194,8 @@ export default function OrdersPage() {
   const [vendor, setVendor] = useState<FoodVendor | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [timeFilter, setTimeFilter] = useState<TimeFilterOption>('all');
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewOrderOpen, setViewOrderOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -163,11 +208,17 @@ export default function OrdersPage() {
     }
     return true;
   });
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   
   const orderAudioRef = useRef<HTMLAudioElement | null>(null);
   const fetchDataRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const fetchOrdersForVendorRef = useRef<(vendorId: string, previousPendingCount: number) => Promise<void>>(() => Promise.resolve());
   const updateOrdersAndTimeRef = useRef<(ordersWithDetails: OrderWithDetails[], previousPendingCount: number) => void>(() => {});
+
+  // Generate time slots when component mounts
+  useEffect(() => {
+    setTimeSlots(generateTimeSlots());
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Audio) {
@@ -373,46 +424,89 @@ export default function OrdersPage() {
     setViewOrderOpen(true);
   };
 
-  const handleUpdateOrderStatus = async (order: FoodOrder, newStatus: string) => {
-    if (newStatus === 'cancelled' && !viewOrderOpen && !confirm(`Are you sure you want to reject order #${order.order_number}?`)) {
-      return;
+// Since FoodOrder is already properly defined in lib/supabase.ts, 
+// we need to make sure we're using it correctly in our component
+
+
+
+
+// Update the handleUpdateOrderStatus function to use the correct type
+const handleUpdateOrderStatus = async (order: FoodOrder, newStatus: OrderStatus) => {
+  if (newStatus === 'cancelled' && !viewOrderOpen && !confirm(`Are you sure you want to reject order #${order.order_number}?`)) {
+    return;
+  }
+  
+  setIsSubmitting(true);
+  setError(null);
+  setSuccess(null);
+
+  try {
+    const validStatuses: OrderStatus[] = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
+    if (!validStatuses.includes(newStatus)) {
+      throw new Error(`Invalid status: ${newStatus}`);
+    }
+
+    // Update UI immediately to provide feedback
+    const updatedAt = new Date().toISOString();
+    
+    // Update local state to reflect the changes immediately
+    setOrders(prevOrders => 
+      prevOrders.map(orderData => {
+        if (orderData.order.id === order.id) {
+          return {
+            ...orderData,
+            order: {
+              ...orderData.order,
+              status: newStatus,
+              updated_at: updatedAt
+            }
+          };
+        }
+        return orderData;
+      })
+    );
+    
+    // If we're viewing a specific order, update that as well
+    if (selectedOrder?.order.id === order.id) {
+      setSelectedOrder(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          order: {
+            ...prev.order,
+            status: newStatus,
+            updated_at: updatedAt
+          }
+        };
+      });
     }
     
-    setIsSubmitting(true);
-    setError(null);
-    setSuccess(null);
-  
-    try {
-      const validStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
-      if (!validStatuses.includes(newStatus)) {
-        throw new Error(`Invalid status: ${newStatus}`);
-      }
-  
-      // Place debugging logs around your update call:
-      const { data, error } = await supabase
-        .from('food_orders')
-        .update({ 
-          status: newStatus,
-          updated_at: new Date().toISOString() 
-        })
-        .eq('id', order.id);
-      
-      console.log('Update response data:', data);
-      console.log('Update error:', error);
-  
-      if (error) throw error;
-  
-      setSuccess(`Order #${order.order_number} status updated to ${newStatus}`);
-  
-      // Update local orders state if needed...
-    } catch (err: unknown) {
-      const errorMessage = isErrorWithMessage(err) ? err.message : 'Error updating order status';
-      setError(errorMessage);
-      console.error(err);
-    } finally {
-      setIsSubmitting(false);
+    // Then perform the actual API call
+    const { error } = await supabase
+      .from('food_orders')
+      .update({ 
+        status: newStatus,
+        updated_at: updatedAt
+      })
+      .eq('id', order.id);
+    
+    if (error) {
+      // If the API call fails, revert the UI changes and show the error
+      throw error;
     }
-  };
+
+    setSuccess(`Order #${order.order_number} status updated to ${newStatus}`);
+  } catch (err: unknown) {
+    // Revert UI changes if API call failed
+    await fetchDataRef.current?.();
+    
+    const errorMessage = isErrorWithMessage(err) ? err.message : 'Error updating order status';
+    setError(errorMessage);
+    console.error(err);
+  } finally {
+    setIsSubmitting(false);
+  }
+};
   
 
   const handleAcceptOrder = async (order: FoodOrder) => {
@@ -441,15 +535,18 @@ export default function OrdersPage() {
     }, 1000);
   };
 
-  const getNextStatus = (currentStatus: string): string | null => {
-    const statusFlow = {
+  const getNextStatus = (currentStatus: OrderStatus): OrderStatus | null => {
+    const statusFlow: Record<OrderStatus, OrderStatus | null> = {
       'pending': 'confirmed',
       'confirmed': 'preparing',
       'preparing': 'ready',
-      'ready': 'completed'
+      'ready': 'completed',
+      'completed': null,
+      'cancelled': null
     };
-    return statusFlow[currentStatus as keyof typeof statusFlow] || null;
+    return statusFlow[currentStatus];
   };
+  
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
@@ -497,13 +594,48 @@ export default function OrdersPage() {
     );
   };
 
+  // Helper function to check if an order is in a time slot
+  const isOrderInTimeSlot = (order: FoodOrder, slot: TimeSlot): boolean => {
+    if (!order.scheduled_pickup_time) return false;
+    
+    const pickupTime = new Date(order.scheduled_pickup_time).getTime();
+    const slotStart = new Date(slot.startTime).getTime();
+    const slotEnd = new Date(slot.endTime).getTime();
+    
+    return pickupTime >= slotStart && pickupTime < slotEnd;
+  };
+
+  // Helper function to check if an order is upcoming or past
+  const isOrderUpcoming = (order: FoodOrder): boolean => {
+    if (!order.scheduled_pickup_time) return false;
+    
+    const now = new Date().getTime();
+    const pickupTime = new Date(order.scheduled_pickup_time).getTime();
+    
+    return pickupTime > now;
+  };
+
   const filteredOrders = orders.filter(o => {
     const orderMatchesSearch = 
       o.order.order_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (o.customer?.email && o.customer.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
       o.vendorName.toLowerCase().includes(searchQuery.toLowerCase());
+    
     const orderMatchesStatus = statusFilter === 'all' || o.order.status === statusFilter;
-    return orderMatchesSearch && orderMatchesStatus;
+    
+    // Apply time filter
+    let orderMatchesTimeFilter = true;
+    
+    if (timeFilter === 'upcoming') {
+      orderMatchesTimeFilter = isOrderUpcoming(o.order);
+    } else if (timeFilter === 'past') {
+      orderMatchesTimeFilter = !isOrderUpcoming(o.order) && !!o.order.scheduled_pickup_time;
+    } else if (timeFilter === 'slot' && selectedTimeSlot) {
+      const selectedSlot = timeSlots.find(slot => slot.label === selectedTimeSlot);
+      orderMatchesTimeFilter = selectedSlot ? isOrderInTimeSlot(o.order, selectedSlot) : true;
+    }
+    
+    return orderMatchesSearch && orderMatchesStatus && orderMatchesTimeFilter;
   });
 
   if (isLoading) {
@@ -562,6 +694,9 @@ export default function OrdersPage() {
     completed: orders.filter(o => o.order.status === 'completed').length,
     cancelled: orders.filter(o => o.order.status === 'cancelled').length
   };
+
+  // Count upcoming orders
+  const upcomingOrdersCount = orders.filter(o => isOrderUpcoming(o.order)).length;
 
   const LastRefreshed = () => lastFetchTime ? (
     <p className="text-sm text-black">
@@ -702,12 +837,32 @@ export default function OrdersPage() {
             <p className="text-xs text-gray-500 mt-1">Delivered to customer</p>
           </CardContent>
         </Card>
+        
+        {/* Upcoming Orders Card */}
+        <Card 
+          className={`border-gray-200 ${timeFilter === 'upcoming' ? 'ring-2 ring-indigo-500 shadow-lg' : 'hover:shadow-md'} cursor-pointer transition-all duration-200`}
+          onClick={() => {
+            setTimeFilter(prev => prev === 'upcoming' ? 'all' : 'upcoming');
+            setSelectedTimeSlot('');
+          }}
+        >
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-sm font-medium text-gray-700">Upcoming</CardTitle>
+            <CalendarClock className="h-4 w-4 text-indigo-500" />
+          </CardHeader>
+          <CardContent className="pt-1">
+            <div className="text-2xl font-bold text-gray-900">{upcomingOrdersCount}</div>
+            <p className="text-xs text-gray-500 mt-1">Future pickup times</p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-wrap gap-2">
             <h2 className="text-xl font-semibold text-gray-900">Orders</h2>
+            
+            {/* Status Filter */}
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[150px] bg-white text-gray-700 border-gray-200 hover:border-gray-300">
                 <SelectValue placeholder="Status" />
@@ -722,7 +877,43 @@ export default function OrdersPage() {
                 <SelectItem value="cancelled" className="text-gray-700">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+            
+            {/* Time Filter */}
+            <Select 
+              value={timeFilter} 
+              onValueChange={(value: TimeFilterOption) => {
+                setTimeFilter(value);
+                if (value !== 'slot') setSelectedTimeSlot('');
+              }}
+            >
+              <SelectTrigger className="w-[160px] bg-white text-gray-700 border-gray-200 hover:border-gray-300">
+                <SelectValue placeholder="Time Filter" />
+              </SelectTrigger>
+              <SelectContent className="bg-white">
+                <SelectItem value="all" className="text-gray-700">All Times</SelectItem>
+                <SelectItem value="upcoming" className="text-gray-700">Upcoming Pickups</SelectItem>
+                <SelectItem value="past" className="text-gray-700">Past Pickups</SelectItem>
+                <SelectItem value="slot" className="text-gray-700">Specific Time Slot</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            {/* Time Slot Selector - Only show when "Specific Time Slot" is selected */}
+            {timeFilter === 'slot' && (
+              <Select value={selectedTimeSlot} onValueChange={setSelectedTimeSlot}>
+                <SelectTrigger className="w-[180px] bg-white text-gray-700 border-gray-200 hover:border-gray-300">
+                  <SelectValue placeholder="Select Time Slot" />
+                </SelectTrigger>
+                <SelectContent className="bg-white max-h-[200px] overflow-y-auto">
+                  {timeSlots.map((slot) => (
+                    <SelectItem key={slot.label} value={slot.label} className="text-gray-700">
+                      {slot.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
+          
           <div className="w-1/3">
             <Input
               placeholder="Search orders..."
@@ -889,26 +1080,31 @@ export default function OrdersPage() {
                           )}
                           
                           {getNextStatus(orderData.order.status) && orderData.order.status !== 'pending' && (
-                            <Button
-                              size="sm"
-                              onClick={() => handleUpdateOrderStatus(orderData.order, getNextStatus(orderData.order.status) || '')}
-                              disabled={isSubmitting}
-                              className={`
-                                ${orderData.order.status === 'confirmed' ? 'bg-purple-500 hover:bg-purple-600' : 
-                                 orderData.order.status === 'preparing' ? 'bg-orange-500 hover:bg-orange-600' : 
-                                 orderData.order.status === 'ready' ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'} 
-                                text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5
-                              `}
-                            >
-                              {orderData.order.status === 'confirmed' && <Coffee className="h-4 w-4" />}
-                              {orderData.order.status === 'preparing' && <Check className="h-4 w-4" />}
-                              {orderData.order.status === 'ready' && <CheckCircle className="h-4 w-4" />}
-                              
-                              {orderData.order.status === 'confirmed' && 'Start Preparing'}
-                              {orderData.order.status === 'preparing' && 'Mark Ready'}
-                              {orderData.order.status === 'ready' && 'Complete Order'}
-                            </Button>
-                          )}
+  <Button
+    size="sm"
+    onClick={() => {
+      const nextStatus = getNextStatus(orderData.order.status);
+      if (nextStatus) {
+        handleUpdateOrderStatus(orderData.order, nextStatus);
+      }
+    }}
+    disabled={isSubmitting}
+    className={`
+      ${orderData.order.status === 'confirmed' ? 'bg-purple-500 hover:bg-purple-600' : 
+       orderData.order.status === 'preparing' ? 'bg-orange-500 hover:bg-orange-600' : 
+       orderData.order.status === 'ready' ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'} 
+      text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5
+    `}
+  >
+    {orderData.order.status === 'confirmed' && <Coffee className="h-4 w-4" />}
+    {orderData.order.status === 'preparing' && <Check className="h-4 w-4" />}
+    {orderData.order.status === 'ready' && <CheckCircle className="h-4 w-4" />}
+    
+    {orderData.order.status === 'confirmed' && 'Start Preparing'}
+    {orderData.order.status === 'preparing' && 'Mark Ready'}
+    {orderData.order.status === 'ready' && 'Complete Order'}
+  </Button>
+)}
                           
                           <Button
                             variant="ghost"
@@ -1087,15 +1283,10 @@ export default function OrdersPage() {
                   <span>{formatPrice(selectedOrder.order.subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-black">
-                  <span>Tax:</span>
+                  <span>Service Fees:</span>
                   <span>{formatPrice(selectedOrder.order.tax)}</span>
                 </div>
-                {selectedOrder.order.tip > 0 && (
-                  <div className="flex justify-between text-black">
-                    <span>Tip:</span>
-                    <span>{formatPrice(selectedOrder.order.tip)}</span>
-                  </div>
-                )}
+
                 <div className="flex justify-between font-bold mt-2 text-black">
                   <span>Total:</span>
                   <span>{formatPrice(selectedOrder.order.total)}</span>
@@ -1116,22 +1307,66 @@ export default function OrdersPage() {
                 </div>
               )}
               
-              <div className="flex justify-end space-x-2 mt-6">
+              <div className="flex justify-end gap-2 mt-6 flex-wrap">
                 {selectedOrder.order.status !== 'completed' && selectedOrder.order.status !== 'cancelled' && (
                   <>
+                    {/* Status flow buttons */}
                     {selectedOrder.order.status === 'pending' && (
+                      <>
+                        <Button
+                          onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'confirmed')}
+                          disabled={isSubmitting}
+                          className="bg-green-500 hover:bg-green-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
+                        >
+                          <CheckCircle className="h-4 w-4" />
+                          <span>Accept Order</span>
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() => {
+                            if (confirm("Are you sure you want to cancel this order?")) {
+                              handleUpdateOrderStatus(selectedOrder.order, 'cancelled');
+                            }
+                          }}
+                          disabled={isSubmitting}
+                          className="bg-red-600 hover:bg-red-700 text-white"
+                        >
+                          <XCircle className="h-4 w-4 mr-1" />
+                          Cancel Order
+                        </Button>
+                      </>
+                    )}
+                    
+                    {selectedOrder.order.status === 'confirmed' && (
                       <Button
-                        variant="destructive"
-                        onClick={() => {
-                          if (confirm("Are you sure you want to cancel this order?")) {
-                            handleUpdateOrderStatus(selectedOrder.order, 'cancelled');
-                            setViewOrderOpen(false);
-                          }
-                        }}
+                        onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'preparing')}
                         disabled={isSubmitting}
-                        className="bg-red-600 hover:bg-red-700 text-white"
+                        className="bg-purple-500 hover:bg-purple-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
                       >
-                        Cancel Order
+                        <Coffee className="h-4 w-4" />
+                        <span>Start Preparing</span>
+                      </Button>
+                    )}
+                    
+                    {selectedOrder.order.status === 'preparing' && (
+                      <Button
+                        onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'ready')}
+                        disabled={isSubmitting}
+                        className="bg-orange-500 hover:bg-orange-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
+                      >
+                        <Check className="h-4 w-4" />
+                        <span>Mark Ready</span>
+                      </Button>
+                    )}
+                    
+                    {selectedOrder.order.status === 'ready' && (
+                      <Button
+                        onClick={() => handleUpdateOrderStatus(selectedOrder.order, 'completed')}
+                        disabled={isSubmitting}
+                        className="bg-green-500 hover:bg-green-600 text-white shadow-sm transition-all duration-200 flex items-center justify-center gap-1.5"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        <span>Complete Order</span>
                       </Button>
                     )}
                   </>
