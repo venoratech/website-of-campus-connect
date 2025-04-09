@@ -886,29 +886,30 @@ const filteredUsers = users.filter(user => {
                               <Badge className="border-red-400 bg-red-50 text-red-700 border">ID Missing</Badge>
                             )}
                           </TableCell>
-                          {/* Desktop Table View - Update UserX icon button to include text */}
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleViewUser(user)}
-                              className="text-black hover:bg-gray-100"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {canEditUsers && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteUser(user.id)}
-                                disabled={user.role === 'super_admin' && profile?.role !== 'super_admin'}
-                                className="text-red-600 hover:bg-red-50"
-                                title="Delete user permanently"
-                              >
-                                <UserX className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </TableCell>
+{/* Desktop Table View - Update UserX icon button to include text */}
+<TableCell className="text-right">
+  <Button
+    variant="ghost"
+    size="sm"
+    onClick={() => handleViewUser(user)}
+    className="text-black hover:bg-gray-100"
+  >
+    <Eye className="h-4 w-4" />
+  </Button>
+  {canEditUsers && (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => handleDeleteUser(user.id)}
+      disabled={user.role === 'super_admin' && profile?.role !== 'super_admin'}
+      className="text-red-600 hover:bg-red-50 flex items-center gap-1"
+      title="Delete user permanently"
+    >
+      <UserX className="h-4 w-4" />
+      <span className="hidden md:inline text-xs">Delete</span>
+    </Button>
+  )}
+</TableCell>
                         </TableRow>
                       ))
                     )}

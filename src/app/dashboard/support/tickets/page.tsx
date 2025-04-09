@@ -46,6 +46,7 @@ import {
   Eye,
   UserCircle,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 // Types
 interface SupportTicket {
@@ -93,6 +94,36 @@ interface SupportStaff {
   profile_image_url: string | null;
 }
 
+//. Enhanced Related Information section for Ticket Detail Modal
+// This code updates the Related Information card to display comprehensive order details
+
+// First, add this type definition to your interfaces section:
+interface RelatedOrder {
+  id: string;
+  order_number: string;
+  vendor_id: string;
+  status: string;
+  total: number;
+  subtotal: number;
+  tax: number;
+  created_at: string;
+  updated_at: string;
+  vendor?: {
+    vendor_name: string;
+  };
+  items?: Array<{
+    id: string;
+    menu_item_id: string;
+    quantity: number;
+    unit_price: number;
+    subtotal: number;
+    menu_item?: {
+      name: string;
+    };
+  }>;
+}
+
+
 export default function SupportTicketsDashboard() {
   const { profile, isLoading } = useAuth();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
@@ -118,7 +149,10 @@ export default function SupportTicketsDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
+  const [relatedOrderDetails, setRelatedOrderDetails] = useState<RelatedOrder | null>(null);
+  const [loadingRelatedOrder, setLoadingRelatedOrder] = useState(false);
+  const router = useRouter();
+  
   // Fields for new ticket creation
   const [newTicket, setNewTicket] = useState({
     subject: "",
@@ -207,6 +241,30 @@ export default function SupportTicketsDashboard() {
     }
   };
 
+  const fetchRelatedOrderDetails = async (orderId: string) => {
+    setLoadingRelatedOrder(true);
+    try {
+      // Call the RPC function instead of directly querying the table
+      const { data, error } = await supabase.rpc(
+        'get_order_details_for_support',
+        { order_id: orderId }
+      );
+  
+      if (error) {
+        console.error('Error fetching related order:', error);
+        return;
+      }
+  
+      if (data) {
+        setRelatedOrderDetails(data);
+      }
+    } catch (err) {
+      console.error('Exception fetching related order:', err);
+    } finally {
+      setLoadingRelatedOrder(false);
+    }
+  };
+
   const fetchTicketResponses = async (ticketId: string) => {
     if (!profile?.id || !hasPermission) return;
 
@@ -255,6 +313,15 @@ export default function SupportTicketsDashboard() {
   const handleViewTicket = async (ticket: SupportTicket) => {
     setSelectedTicket(ticket);
     await fetchTicketResponses(ticket.id);
+    
+    // If ticket has a related order, fetch the order details
+    if (ticket.related_order_id) {
+      fetchRelatedOrderDetails(ticket.related_order_id);
+    } else {
+      // Clear any previous order details
+      setRelatedOrderDetails(null);
+    }
+    
     setIsDetailModalOpen(true);
   };
 
@@ -1099,38 +1166,104 @@ export default function SupportTicketsDashboard() {
                 </Card>
 
                 <Card className="col-span-1">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-black">
-                      Related Information
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {selectedTicket.related_order_id && (
-                      <div>
-                        <p className="text-xs text-gray-500">Related Order</p>
-                        <p className="mt-1 text-sm text-black">
-                          #{selectedTicket.related_order_id}
-                        </p>
-                      </div>
-                    )}
+  <CardHeader className="pb-2">
+    <CardTitle className="text-sm font-medium text-black">
+      Related Information
+    </CardTitle>
+  </CardHeader>
+  <CardContent className="space-y-3">
+    {selectedTicket?.related_order_id ? (
+      loadingRelatedOrder ? (
+        <div className="flex justify-center py-4">
+          <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-gray-900"></div>
+        </div>
+      ) : relatedOrderDetails ? (
+        <div className="space-y-3">
+          <div>
+            <div className="flex justify-between items-center">
+              <p className="text-sm font-medium text-black">Order Details</p>
+              <Badge variant="outline" className={`${
+                relatedOrderDetails.status === 'completed' ? 'bg-green-50 text-green-700' :
+                relatedOrderDetails.status === 'cancelled' ? 'bg-red-50 text-red-700' :
+                'bg-blue-50 text-blue-700'
+              }`}>
+                {relatedOrderDetails.status.charAt(0).toUpperCase() + relatedOrderDetails.status.slice(1)}
+              </Badge>
+            </div>
+            <div className="mt-2 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-xs text-gray-500">Order #:</span>
+                <span className="text-xs font-medium text-black">{relatedOrderDetails.order_number || relatedOrderDetails.id.substring(0, 8)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-xs text-gray-500">Vendor:</span>
+                <span className="text-xs font-medium text-black">{relatedOrderDetails.vendor?.vendor_name || 'Unknown'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-xs text-gray-500">Date:</span>
+                <span className="text-xs font-medium text-black">{format(new Date(relatedOrderDetails.created_at), "MMM d, yyyy")}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-xs text-gray-500">Total:</span>
+                <span className="text-xs font-medium text-primary">EGP {relatedOrderDetails.total.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+          
+          {relatedOrderDetails.items && relatedOrderDetails.items.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-black mb-1">Items:</p>
+              <div className="bg-gray-50 p-2 rounded-md border border-gray-100 max-h-32 overflow-y-auto">
+                {relatedOrderDetails.items.map((item, index) => (
+                  <div key={item.id} className={`flex justify-between text-xs py-1 ${
+                    index !== relatedOrderDetails.items!.length - 1 ? 'border-b border-gray-100' : ''
+                  }`}>
+                    <span className="text-gray-700">
+                      {item.quantity}x {item.menu_item?.name || 'Unknown item'}
+                    </span>
+                    <span className="text-gray-700">EGP {item.subtotal.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="w-full text-xs h-7 mt-1"
+            onClick={() => {
+              router.push(`/dashboard/orders/${relatedOrderDetails.id}`);
+            }}
+          >
+            View Full Order
+          </Button>
+        </div>
+      ) : (
+        <div className="text-sm text-gray-500">
+          <p>Related Order: {selectedTicket.related_order_id.substring(0, 8)}</p>
+          <p className="text-xs text-red-500 mt-1">Unable to load order details</p>
+        </div>
+      )
+    ) : selectedTicket?.related_item_id ? (
+      <div>
+        <p className="text-xs text-gray-500">Related Item</p>
+        <p className="mt-1 text-sm text-black">
+          #{selectedTicket.related_item_id}
+        </p>
+      </div>
+    ) : (
+      <div className="text-sm text-gray-500">No related items or orders</div>
+    )}
 
-                    {selectedTicket.related_item_id && (
-                      <div>
-                        <p className="text-xs text-gray-500">Related Item</p>
-                        <p className="mt-1 text-sm text-black">
-                          #{selectedTicket.related_item_id}
-                        </p>
-                      </div>
-                    )}
-
-                    <div>
-                      <p className="text-xs text-gray-500">Last Updated</p>
-                      <p className="mt-1 text-sm text-black">
-                        {format(new Date(selectedTicket.updated_at), "PPP p")}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
+    <div>
+      <p className="text-xs text-gray-500">Last Updated</p>
+      <p className="mt-1 text-sm text-black">
+        {selectedTicket && format(new Date(selectedTicket.updated_at), "PPP p")}
+      </p>
+    </div>
+  </CardContent>
+</Card>
               </div>
 
               {/* Ticket description */}
