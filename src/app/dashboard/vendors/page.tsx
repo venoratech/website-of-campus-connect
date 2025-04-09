@@ -28,6 +28,7 @@ import { formatDate } from '@/lib/utils';
 import { Eye, CheckCircle, XCircle, User, Edit } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import PickupIntervalSettings from '@/components/admin/PickupIntervalSettings';
+import TaxRateSettings from '@/components/admin/TaxRateSettings';
 
 // Define interfaces for our data types
 interface Profile {
@@ -528,8 +529,14 @@ export default function VendorsPage() {
         </Card>
       </div>
 
-      <PickupIntervalSettings />
+      {/* System Configuration Settings */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Pickup Interval Settings */}
+        <PickupIntervalSettings />
 
+        {/* Tax Rate Settings */}
+        <TaxRateSettings />
+      </div>
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
