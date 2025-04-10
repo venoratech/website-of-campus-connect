@@ -113,7 +113,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       { icon: Gift, title: 'Promotions', href: '/dashboard/promotions' },
       { icon: MessageSquare, title: 'Messages', href: '/dashboard/messages' },
       { icon: Clock, title: 'Order Management', href: '/dashboard/orders' },
-      { icon: UserCog, title: 'Cashier Management', href: '/dashboard/admin/cashiers' }, // New item for vendors
+      { icon: UserCog, title: 'Cashier Management', href: '/dashboard/admin/cashiers' },
+      { icon: MessageSquare, title: 'Reviews', href: '/dashboard/reviews' }, // Add this line
+      // New item for vendors
     ];
 
     const adminItems = [
@@ -137,6 +139,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     const vendorManagerItems = [
       { icon: Store, title: 'Vendors', href: '/dashboard/vendors' },
       { icon: UserCog, title: 'Cashier Management', href: '/dashboard/admin/cashiers' }, // New item for vendor managers
+
     ];
 
     // Marketplace Moderator navigation items

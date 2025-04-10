@@ -20,7 +20,7 @@ export default function PickupIntervalSettings() {
 
   useEffect(() => {
     const fetchPickupInterval = async () => {
-      if (!profile || profile.role !== 'admin') {
+      if (!profile || profile.role !== 'admin' && profile.role !== 'super_admin' && profile.role !== "vendor_manager") {
         setIsLoading(false);
         return;
       }
@@ -67,7 +67,7 @@ export default function PickupIntervalSettings() {
   }, [profile]);
 
   const handleSave = async () => {
-    if (!profile || profile.role !== 'admin') {
+    if (!profile || profile.role !== 'admin' && profile.role !== "super_admin"&& profile.role !== "vendor_manager") {
       toast({
         title: 'Permission Denied',
         description: 'You must be an admin to change these settings',
@@ -152,7 +152,7 @@ export default function PickupIntervalSettings() {
   };
 
   // Show a different UI for non-admin users
-  if (!profile || profile.role !== 'admin') {
+  if (!profile || profile.role !== 'admin'&& profile.role !== "super_admin"&& profile.role !== "vendor_manager") {
     return null; // Don't show anything to non-admins
   }
 

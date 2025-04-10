@@ -168,7 +168,7 @@ export default function VendorsPage() {
   };
 
   const handleSaveVendor = async () => {
-    if (!selectedVendor || profile?.role !== 'admin') return;
+    if (!selectedVendor || profile?.role !== 'admin' && profile?.role !== 'vendor_manager' && profile?.role !== "super_admin") return;
     
     setIsSubmitting(true);
     setError(null);
@@ -253,54 +253,64 @@ export default function VendorsPage() {
     if (!confirm('Are you sure you want to approve this vendor?')) {
       return;
     }
-
+  
     setIsSubmitting(true);
     setError(null);
     setSuccess(null);
-
+  
     try {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ is_approved: true })
-        .eq('id', vendorProfile.id);
-
-      if (updateError) throw updateError;
-
+      console.log('Approving vendor profile using RPC function:', vendorProfile);
+  
+      // Call the RPC function we created
+      const { data, error } = await supabase.rpc(
+        'approve_vendor',
+        { vendor_id: vendorProfile.id }
+      );
+  
+      console.log('RPC function response:', { data, error });
+  
+      if (error) throw error;
+  
       setSuccess(`Vendor ${vendorProfile.business_name || vendorProfile.email} approved successfully`);
-
+  
       // Update local state
-      setVendors(vendors.map(v => {
-        if (v.profile_id === vendorProfile.id || (v.profile && v.profile.id === vendorProfile.id)) {
-          if (v.profile) {
+      setVendors(prevVendors => 
+        prevVendors.map(v => {
+          if (v.profile_id === vendorProfile.id || (v.profile && v.profile.id === vendorProfile.id)) {
             return {
               ...v,
-              profile: { ...v.profile, is_approved: true }
-            };
-          } else {
-            return {
-              ...v,
-              is_approved: true
+              profile: v.profile ? { ...v.profile, is_approved: true } : undefined
             };
           }
-        }
-        return v;
-      }));
+          return v;
+        })
+      );
       
-      // Update selected vendor if it's the one that was approved
+      // Update selected vendor if needed
       if (selectedVendor && 
           (selectedVendor.profile_id === vendorProfile.id || 
-           (selectedVendor.profile && selectedVendor.profile.id === vendorProfile.id))) {
-        setSelectedVendor({
-          ...selectedVendor,
-          profile: selectedVendor.profile ? {
-            ...selectedVendor.profile,
-            is_approved: true
-          } : undefined
-        });
+          (selectedVendor.profile && selectedVendor.profile.id === vendorProfile.id))) {
+        if (selectedVendor.profile) {
+          setSelectedVendor({
+            ...selectedVendor,
+            profile: {
+              ...selectedVendor.profile,
+              is_approved: true
+            }
+          });
+        }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error approving vendor');
-      console.error(err);
+      console.error('Approval error:', err);
+      
+      if (err instanceof Error) {
+        setError(err.message);
+      } else if (typeof err === 'object' && err !== null) {
+        const errorStr = JSON.stringify(err);
+        setError(errorStr !== '{}' ? errorStr : 'Database error. Check Supabase logs.');
+      } else {
+        setError('An unknown error occurred while approving vendor');
+      }
     } finally {
       setIsSubmitting(false);
     }
