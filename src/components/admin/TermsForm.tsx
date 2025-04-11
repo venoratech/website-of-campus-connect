@@ -202,10 +202,26 @@ export function TermsForm({ initialData, userId, onSuccessAction, onCancelAction
               <SelectItem value="food_service">Food Service</SelectItem>
               <SelectItem value="privacy">Privacy Policy</SelectItem>
               <SelectItem value="community">Community Guidelines</SelectItem>
+              <SelectItem value="refund_policy">Refund Policy</SelectItem>
+              <SelectItem value="custom">Custom Terms</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
+      
+      {formState.type === 'custom' && (
+        <div className="space-y-2">
+          <Label htmlFor="customTypeName" className="text-black">Custom Type Name</Label>
+          <Input
+            id="customTypeName"
+            value={formState.title}
+            onChange={(e) => setFormState({...formState, title: e.target.value})}
+            placeholder="Enter a name for your custom terms type"
+            required
+            className="text-black"
+          />
+        </div>
+      )}
       
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
