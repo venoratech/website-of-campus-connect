@@ -78,6 +78,9 @@ const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
     payment_processing: false
   });
 
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
+  const [sortField, setSortField] = useState<'name' | 'email' | 'role' | 'created_at' | null>(null);
+
   
 
   
@@ -407,18 +410,64 @@ const confirmDeleteUser = async () => {
 };
 // Update the filteredUsers function to exclude deleted users
 // Updated filteredUsers function to exclude users with "deleted_" prefix in email
-const filteredUsers = users.filter(user => {
-  // Exclude users with "deleted_" prefix in their email
-  if (user.email.startsWith('deleted_')) return false;
-  
-  const searchMatches =
-    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (user.first_name && user.first_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (user.last_name && user.last_name.toLowerCase().includes(searchQuery.toLowerCase()));
+const filteredUsers = users
+  .filter(user => {
+    // Exclude users with "deleted_" prefix in their email
+    if (user.email.startsWith('deleted_')) return false;
+    
+    const searchMatches =
+      user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (user.first_name && user.first_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (user.last_name && user.last_name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  const roleMatches = roleFilter === 'all' || user.role === roleFilter;
-  return searchMatches && roleMatches;
-});
+    const roleMatches = roleFilter === 'all' || user.role === roleFilter;
+    return searchMatches && roleMatches;
+  })
+  .sort((a, b) => {
+    if (!sortDirection || !sortField) return 0;
+    
+    let comparison = 0;
+    
+    switch (sortField) {
+      case 'name':
+        const nameA = `${a.first_name || ''} ${a.last_name || ''}`.trim();
+        const nameB = `${b.first_name || ''} ${b.last_name || ''}`.trim();
+        
+        // Handle empty names by pushing them to the end
+        if (!nameA && !nameB) return 0;
+        if (!nameA) return sortDirection === 'asc' ? 1 : -1;
+        if (!nameB) return sortDirection === 'asc' ? -1 : 1;
+        
+        comparison = nameA.toLowerCase().localeCompare(nameB.toLowerCase());
+        break;
+      case 'email':
+        // Handle empty emails by pushing them to the end
+        if (!a.email && !b.email) return 0;
+        if (!a.email) return sortDirection === 'asc' ? 1 : -1;
+        if (!b.email) return sortDirection === 'asc' ? -1 : 1;
+        
+        comparison = a.email.toLowerCase().localeCompare(b.email.toLowerCase());
+        break;
+      case 'role':
+        // Handle empty roles by pushing them to the end
+        if (!a.role && !b.role) return 0;
+        if (!a.role) return sortDirection === 'asc' ? 1 : -1;
+        if (!b.role) return sortDirection === 'asc' ? -1 : 1;
+        
+        comparison = a.role.localeCompare(b.role);
+        break;
+      case 'created_at':
+        // Handle empty dates by pushing them to the end
+        if (!a.created_at && !b.created_at) return 0;
+        if (!a.created_at) return sortDirection === 'asc' ? 1 : -1;
+        if (!b.created_at) return sortDirection === 'asc' ? -1 : 1;
+        
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        break;
+    }
+    
+    return sortDirection === 'asc' ? comparison : -comparison;
+  });
 
   const usersByRole = {
     student: users.filter(u => u.role === 'student').length,
@@ -821,11 +870,107 @@ const filteredUsers = users.filter(user => {
                 <Table>
                   <TableHeader className="bg-gray-50">
                     <TableRow>
-                      <TableHead className="text-black">Name</TableHead>
-                      <TableHead className="text-black">Email</TableHead>
-                      <TableHead className="text-black">Role</TableHead>
+                      <TableHead 
+                        className="text-black cursor-pointer hover:bg-gray-100"
+                        onClick={() => {
+                          if (sortField !== 'name') {
+                            setSortField('name');
+                            setSortDirection('asc');
+                          } else if (sortDirection === 'asc') {
+                            setSortDirection('desc');
+                          } else if (sortDirection === 'desc') {
+                            setSortField(null);
+                            setSortDirection(null);
+                          } else {
+                            setSortDirection('asc');
+                          }
+                        }}
+                      >
+                        <div className="flex items-center">
+                          Name
+                          {sortField === 'name' && (
+                            <span className="ml-1">
+                              {sortDirection === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-black cursor-pointer hover:bg-gray-100"
+                        onClick={() => {
+                          if (sortField !== 'email') {
+                            setSortField('email');
+                            setSortDirection('asc');
+                          } else if (sortDirection === 'asc') {
+                            setSortDirection('desc');
+                          } else if (sortDirection === 'desc') {
+                            setSortField(null);
+                            setSortDirection(null);
+                          } else {
+                            setSortDirection('asc');
+                          }
+                        }}
+                      >
+                        <div className="flex items-center">
+                          Email
+                          {sortField === 'email' && (
+                            <span className="ml-1">
+                              {sortDirection === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-black cursor-pointer hover:bg-gray-100"
+                        onClick={() => {
+                          if (sortField !== 'role') {
+                            setSortField('role');
+                            setSortDirection('asc');
+                          } else if (sortDirection === 'asc') {
+                            setSortDirection('desc');
+                          } else if (sortDirection === 'desc') {
+                            setSortField(null);
+                            setSortDirection(null);
+                          } else {
+                            setSortDirection('asc');
+                          }
+                        }}
+                      >
+                        <div className="flex items-center">
+                          Role
+                          {sortField === 'role' && (
+                            <span className="ml-1">
+                              {sortDirection === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
+                      </TableHead>
                       <TableHead className="text-black">Status</TableHead>
-                      <TableHead className="text-black">Joined</TableHead>
+                      <TableHead 
+                        className="text-black cursor-pointer hover:bg-gray-100"
+                        onClick={() => {
+                          if (sortField !== 'created_at') {
+                            setSortField('created_at');
+                            setSortDirection('asc');
+                          } else if (sortDirection === 'asc') {
+                            setSortDirection('desc');
+                          } else if (sortDirection === 'desc') {
+                            setSortField(null);
+                            setSortDirection(null);
+                          } else {
+                            setSortDirection('asc');
+                          }
+                        }}
+                      >
+                        <div className="flex items-center">
+                          Joined
+                          {sortField === 'created_at' && (
+                            <span className="ml-1">
+                              {sortDirection === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </div>
+                      </TableHead>
                       <TableHead className="text-black">ID Verified</TableHead>
                       <TableHead className="text-right text-black">Actions</TableHead>
                     </TableRow>

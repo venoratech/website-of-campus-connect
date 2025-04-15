@@ -80,6 +80,18 @@ export type MenuItem = {
   updated_at: string;
 };
 
+// New type for menu item additions
+export type MenuItemAddition = {
+  id: string;
+  menu_item_id: string;
+  name: string;
+  price: number;
+  is_available: boolean;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type FoodOrder = {
   id: string;
   order_number: string;
@@ -98,6 +110,26 @@ export type FoodOrder = {
   actual_pickup_time: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type OrderItem = {
+  id: string;
+  order_id: string;
+  menu_item_id: string;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  special_instructions: string | null;
+  created_at: string;
+};
+
+// New type for order item additions
+export type OrderItemAddition = {
+  id: string;
+  order_item_id: string;
+  addition_id: string;
+  price: number;
+  created_at: string;
 };
 
 export type MarketplaceItem = {
@@ -127,7 +159,7 @@ export type MarketplaceTransaction = {
   updated_at: string;
 };
 
-// New types for role-based permissions system
+// Role-based permissions system
 export type RoleName = Profile['role'];
 
 export type RolePermission = {
@@ -158,4 +190,4 @@ export type RolePermission = {
   };
   created_at: string;
   updated_at: string;
-}
+};
