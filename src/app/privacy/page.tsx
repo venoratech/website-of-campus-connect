@@ -27,7 +27,7 @@ export default function PrivacyPage() {
         </CardHeader>
         <CardContent>
           <p className="mb-4">
-            This document outlines the terms and conditions for using the University Companion App ("we", "us", or "our"), as well as our policies regarding refunds, food service terms, and how we handle your personal data. Our app is designed to simplify and enhance student life by providing services such as food ordering, a student marketplace, tutoring services, and AI-powered productivity tools, tailored specifically for university students. By downloading or using this app, you agree to these terms and policies.
+            This document outlines the terms and conditions for using the University Companion App (&quot;we&quot;, &quot;us&quot;, or &quot;our&quot;), as well as our policies regarding refunds, food service terms, and how we handle your personal data. Our app is designed to simplify and enhance student life by providing services such as food ordering, a student marketplace, tutoring services, and AI-powered productivity tools, tailored specifically for university students. By downloading or using this app, you agree to these terms and policies.
           </p>
         </CardContent>
       </Card>
@@ -59,7 +59,7 @@ export default function PrivacyPage() {
           <ul className="list-disc pl-6 space-y-2">
             <li>All transactions are directly between buyers and sellers.</li>
             <li>Sellers are responsible for accurately describing their products and setting their refund/return terms.</li>
-            <li>Buyers should review a seller's return policy before purchasing.</li>
+            <li>Buyers should review a seller&#39;s return policy before purchasing.</li>
             <li>The app does not guarantee refunds or intervene in payment disputes.</li>
             <li>Users are encouraged to resolve issues respectfully and report misconduct when necessary.</li>
           </ul>
@@ -125,7 +125,7 @@ export default function PrivacyPage() {
         </CardHeader>
         <CardContent>
           <p className="mb-4">
-            This Privacy Policy outlines how University Companion App ("we", "our", or "us") collects, uses, stores, and protects the personal information of its users ("you").
+            This Privacy Policy outlines how University Companion App (&quot;we&quot;, &quot;our&quot;, or &quot;us&quot;) collects, uses, stores, and protects the personal information of its users (&quot;you&quot;).
           </p>
 
           <h3 className="text-xl font-semibold mt-6 mb-4">Information Collection</h3>
@@ -139,7 +139,7 @@ export default function PrivacyPage() {
           <h4 className="font-semibold mb-2">Sensitive Information</h4>
           <ul className="list-disc pl-6 space-y-2 mb-4">
             <li>Payment Information: If you make purchases within the app, we collect transaction-related information, including your payment card details and billing address, which are processed by our secure payment gateway provider.</li>
-            <li>Camera Access: We may request access to your device's camera to facilitate ID verification for account security and to allow you to upload photos directly when adding products to the marketplace.</li>
+            <li>Camera Access: We may request access to your device&#39;s camera to facilitate ID verification for account security and to allow you to upload photos directly when adding products to the marketplace.</li>
           </ul>
 
           <h3 className="text-xl font-semibold mt-6 mb-4">Use of Information</h3>
